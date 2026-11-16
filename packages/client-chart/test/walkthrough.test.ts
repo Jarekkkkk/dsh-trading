@@ -116,7 +116,13 @@ describe('boardAt', () => {
 })
 
 describe('LessonPlayer', () => {
-  beforeEach(() => { vi.useFakeTimers() })
+  beforeEach(() => {
+    vi.useFakeTimers()
+    // The player remembers performed sections in sessionStorage. Node ≥22.4 ships a
+    // real one, so an id written by an earlier case makes every later live section
+    // look already-spoken — green on CI's Node 22, red on a modern runtime.
+    ;(globalThis as { sessionStorage?: Storage }).sessionStorage?.clear()
+  })
   afterEach(() => { vi.useRealTimers() })
 
   it('speaks a live section one line at a time, moving the cursor with each', () => {
