@@ -99,6 +99,10 @@ export interface OhlcvResponse {
   symbol: string
   timeframe: string
   candles: Candle[]
+  /** Regime snapshot for the chips; absent when the host sent no enrichment. */
+  indicators?: unknown
+  /** Per-bar indicator series, for the toggleable panes. */
+  series?: Record<string, (number | null)[]>
 }
 
 /**
@@ -237,6 +241,11 @@ export async function serveMarketEndpoint(
   endpoint: string,
   payload: unknown,
   onView?: (view: ChartView) => void,
+  /**
+   * Optional candle→chart enrichment, supplied by the host entry so this module
+   * stays free of the indicator library (the browser bundle imports it).
+   */
+  enrich?: (candles: readonly Candle[]) => { indicators: unknown; series: Record<string, (number | null)[]> },
 ): Promise<SymbolsResponse | OhlcvResponse | SearchResponse | { ok: true }> {
   if (endpoint === ENDPOINTS.view) {
     const view = readChartView(payload)
@@ -271,7 +280,8 @@ export async function serveMarketEndpoint(
       timeframe: request.timeframe,
       limit: request.limit,
     })
-    return { providerId: provider.id, symbol: request.symbol, timeframe: request.timeframe, candles }
+    const extra = enrich === undefined ? {} : enrich(candles)
+    return { providerId: provider.id, symbol: request.symbol, timeframe: request.timeframe, candles, ...extra }
   }
 
   throw new Error(`unknown endpoint '${endpoint}'`)

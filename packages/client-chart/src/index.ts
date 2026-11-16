@@ -22,6 +22,7 @@ import type { HostConnectionHandle } from '@deepseek-ai/dsh-client-connection'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { ChartView, MarketDataLike } from './market-rpc.js'
+import { enrichChart } from './chart-indicators.js'
 import { describeChartView, ENDPOINTS, MARKET_CHANNEL, serveMarketEndpoint } from './market-rpc.js'
 
 export {
@@ -78,7 +79,7 @@ export function apply(ctx: Context): void {
         value: await serveMarketEndpoint(marketData, endpoint, payload, next => {
           view = next
           viewAt = Date.now()
-        }),
+        }, enrichChart),
       }
     } catch (error) {
       // The panel shows this text verbatim, so it must read as guidance:

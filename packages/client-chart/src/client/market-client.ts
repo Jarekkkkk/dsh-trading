@@ -357,13 +357,24 @@ export function candlesToPayload(
   symbol: string,
   timeframe: string,
   candles: ChartPayload['timeframes'][number]['candles'],
+  /**
+   * Regime snapshot and per-bar series from the host. Absent on a host that sent
+   * no enrichment; the chart still draws, only the chips and panes go away.
+   */
+  extra?: { indicators?: unknown; series?: Record<string, (number | null)[]> },
 ): ChartPayload {
   return {
     kind: 'chart',
     version: 1,
     provider: providerId,
     symbol,
-    timeframes: [{ timeframe, candles, indicators: null, annotations: [] }],
+    timeframes: [{
+      timeframe,
+      candles,
+      indicators: (extra?.indicators ?? null) as ChartPayload['timeframes'][number]['indicators'],
+      annotations: [],
+      ...extra?.series === undefined ? {} : { series: extra.series },
+    }],
     scenarios: [],
   }
 }
@@ -397,11 +408,16 @@ export function createMarketClient(rpc: RpcCaller): MarketClient {
         symbol: string
         timeframe: string
         candles: ChartPayload['timeframes'][number]['candles']
+        indicators?: unknown
+        series?: Record<string, (number | null)[]>
       }
       if (value.candles.length === 0) {
         throw new Error(`${symbol} @ ${timeframe}: the provider returned no bars for this window`)
       }
-      return candlesToPayload(value.providerId, value.symbol, value.timeframe, value.candles)
+      return candlesToPayload(value.providerId, value.symbol, value.timeframe, value.candles, {
+        ...value.indicators === undefined ? {} : { indicators: value.indicators },
+        ...value.series === undefined ? {} : { series: value.series },
+      })
     },
 
     publishView(view) {

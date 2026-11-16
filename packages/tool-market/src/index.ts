@@ -28,7 +28,7 @@ export { regimeSnapshot, renderSnapshot } from './regime.js'
 export type { RegimeSnapshot } from './regime.js'
 export { chartHtml, renderChartSvg } from './chart.js'
 export type { ChartLevel, ChartOptions, ChartOverlay } from './chart.js'
-export { chartCandles, chartSeries, CHART_META_BARS } from './chart-payload.js'
+export { chartCandles, chartSeries, regimeSeries, roundSeries, CHART_META_BARS } from './chart-payload.js'
 export type {
   AnnotationRole, ChartAnnotation, ChartCandle, ChartLevelAnnotation, ChartPayload,
   ChartScenario, ChartSeries, ChartTimeframeData, ChartZoneAnnotation,
