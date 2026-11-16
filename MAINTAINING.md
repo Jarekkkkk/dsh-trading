@@ -65,6 +65,18 @@ them without `compatibility.json`.
 pnpm `file:` dependencies copy the package; `link:` symlinks it. Use `link:`, or every
 edit needs a reinstall.
 
+## Debugging note: verify your capture is live
+
+A whole afternoon went into a "the chart card never renders" bug that did not exist. The
+card was fine; it renders inside the collapsed work-details fold of a finished turn
+(`Completed in Ns`, click to expand). What wasted the time was trusting screenshots from
+an automation browser that returned a **frozen frame** — two consecutive captures came
+back byte-identical after a click and a scroll while the DOM changed underneath.
+
+Before concluding that something did not render, make the capture prove it is live: two
+captures that must differ (a click, a scroll, a different tab), or a real-browser window
+grab, or a human glance at the screen.
+
 ## Known upstream defects we inherited
 
 - `pnpm typecheck` fails on a clean clone (no build dependency, no TS project references).
