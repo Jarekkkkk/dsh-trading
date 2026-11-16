@@ -83,3 +83,26 @@ grab, or a human glance at the screen.
 - `@dsh-trading/{tool-market,verdict,risk-guard}@0.2.0` pin `@deepseek-ai/dsh-tools@0.1.0-rc.6`
   while the local dsh runtime is `0.2.2-rc.3`. A profile loading them needs an exact-version
   exemption until the peer is bumped.
+
+## The chart column rides dsh own right sidebar
+
+`@dsh-trading/client-chart` puts a persistent chart beside the conversation without
+touching the shell. `client-frame` is NOT used: that package owns `ui-layout`, and when its
+0.1.0-rc.6 layout contract met dsh 0.2.2 the entire client failed to boot. Here one row fails
+at worst.
+
+What the integration needs, all learned from the running runtime:
+
+- register a tab *type* via the `sidebarRightTabs` service, and wait for that service with
+  `ctx.inject([...])` — reading it with `ctx.get` at apply time silently loses the tab;
+- claim the body in the keyed slot `sidebar.right.pane.tab` under BOTH the tab kind and the
+  tab id: the pane renders `entryKey = definition.id ?? tab.kind`, and only the id matches
+  once the definition is registered;
+- claim `sidebar.right.pane.tab.title` the same way, or the tab renders as a blank chip;
+- `openTab` refuses until a conversation surface is mounted and publishes no event for that,
+  so retry a bounded 30x2s; then `toggleExpanded()` — a tab in a collapsed bar is invisible;
+- a `guide` entry in the tab definition is what makes a closed tab reopenable: the strip "+"
+  opens the guide tab, which lists those entries by title.
+
+Break risk: the two controller calls (`openTab`, `toggleExpanded`) are outside the documented
+slot contract. A future rc that moves them breaks this row only.

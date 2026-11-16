@@ -34,6 +34,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * key in its client typings — only its own sidebar packages use it.
      */
     'sidebar.right.pane.tab': { kind: 'keyed'; scope: 'session'; owner: { market: MarketClient } }
+    'sidebar.right.pane.tab.title': { kind: 'keyed'; scope: 'session'; owner: Record<string, never> }
   }
 }
 
@@ -41,6 +42,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
  * The sidebar tab body: the same column the trading frame seats, sized by its host
  * rather than by the frame (no frame is mounted here).
  */
+/** The tab label. An empty title renders as a blank chip in the tab strip. */
+function ChartTabTitle(): JSX.Element {
+  return createElement('span', null, 'Chart')
+}
+
 function SidebarChart(props: { market: MarketClient }): JSX.Element {
   const [width, setWidth] = useState(640)
   const ref = useRef<HTMLDivElement | null>(null)
@@ -136,8 +142,22 @@ export function apply(ctx: ClientContext): void {
         { name: 'sidebar.right.pane.tab', key, registrant: '@dsh-trading/client-chart', inject: () => ({ market }) },
         SidebarChart,
       )))
+    // A tab with no title renders as a blank chip: the label is its own keyed slot.
+    ctx.slots.inject('sidebar.right.pane.tab.title', () => [tabKind, tabId].map(key =>
+      ctx.slots.register(
+        { name: 'sidebar.right.pane.tab.title', key, registrant: '@dsh-trading/client-chart' },
+        ChartTabTitle,
+      )))
     try {
-      tabs.register({ id: tabId, kind: tabKind, priority: 'builtin', title: () => 'Chart' })
+      tabs.register({
+        id: tabId,
+        kind: tabKind,
+        priority: 'builtin',
+        title: () => 'Chart',
+        // What the sidebar's "+" menu lists: without an entry the closed tab is
+        // unreachable until the page reloads.
+        guide: [{ id: tabId, kind: tabKind, title: () => 'Chart', description: () => 'Persistent chart column' }],
+      })
     } catch (error) {
       console.warn('[client-chart] could not register the chart tab', error)
       return
