@@ -62,8 +62,8 @@ The old exact-version exemptions are gone: the packages now declare
 `@deepseek-ai/dsh-tools@0.2.2-rc.3`, matching the local runtime, so the loader accepts
 them without `compatibility.json`.
 
-`psp` note: pnpm `file:` overrides copy the package; `link:` symlinks it. Use `link:`
-or every edit needs a reinstall.
+pnpm `file:` dependencies copy the package; `link:` symlinks it. Use `link:`, or every
+edit needs a reinstall.
 
 ## Known upstream defects we inherited
 
