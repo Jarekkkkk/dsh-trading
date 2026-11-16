@@ -181,30 +181,22 @@ export function apply(ctx: Context): void {
     const connection = scoped.get('connection') as HostConnectionHandle
     const marketData = scoped.get('marketData') as MarketDataLike
 
-    // Exact Fetch routes, not `connection.rpc.handle`: in dsh 0.2.x a channel
-    // registered through the rpc registry never reaches the HTTP server (the panel
-    // got "HTTP 405" for every call), while the fetch registry is what dsh's own
-    // routes use (`GET /api/file`, the file-upload POST). One exact route per
-    // endpoint, all POST, buffered body.
+    // dsh 0.2.x: all RPC rides the shared /api channel. `rpc.handle(MARKET_CHANNEL)`
+    // mounts a prefix route on a path the /api owner never forwards to (the panel
+    // got HTTP 405), and `fetch.register(MARKET_CHANNEL/...)` is refused outright
+    // ("invalid exact Fetch route" — exact routes must live under /api). The
+    // sanctioned seam is what dsh's own gateway uses: `rpc.intercept('/api',`
+    // claim the endpoints this plugin owns, and the handler answers them.
     const handle = makeHandler(marketData)
+    const marketPrefix = 'dsh-trading-market'
     scoped.effect(() => {
-      const registered = Object.values(ENDPOINTS).map(endpoint =>
-        connection.fetch.register({
-          path: `${MARKET_CHANNEL}/${endpoint}`,
-          methods: ['POST'],
-          requestBody: 'buffered',
-          fetch: async (request: Request) => {
-            let payload: unknown = null
-            try {
-              payload = await request.json()
-            } catch {
-              payload = null
-            }
-            return Response.json(await handle(endpoint, payload))
-          },
-        }))
+      const dispose = (connection.rpc as unknown as {
+        intercept?: (channel: string, matches: (endpoint: string) => boolean, handler: (endpoint: string, payload: unknown) => Promise<unknown>) => () => void
+      }).intercept?.call(connection.rpc, '/api',
+        endpoint => endpoint.startsWith(`${marketPrefix}/`),
+        (endpoint, payload) => handle(endpoint.slice(marketPrefix.length + 1), payload))
       return () => {
-        for (const dispose of registered) void dispose()
+        void dispose?.()
       }
     }, 'client-chart: market data channel')
   })
