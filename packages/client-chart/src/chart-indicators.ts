@@ -28,6 +28,9 @@ export interface ChartEnrichment {
 export function enrichChart(candles: readonly Candle[]): ChartEnrichment {
   return {
     indicators: regimeSnapshot(candles),
-    series: chartSeries(regimeSeries(candles)),
+    // Capped to THIS window, not to the chart-card default: the panel draws every
+    // bar it fetched (1000), and a chip is only clickable when its series column
+    // has exactly one value per candle (hasSeries compares lengths).
+    series: chartSeries(regimeSeries(candles), candles.length),
   }
 }

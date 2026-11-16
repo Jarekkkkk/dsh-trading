@@ -106,10 +106,47 @@ export function mergeTail(series: readonly Candle[], tail: readonly Candle[]): C
  * @param candles - the merged series.
  * @returns a new payload, or the original when the series did not move.
  */
+/**
+ * Re-align every indicator column to a new candle series.
+ *
+ * The panel's live tail replaces the forming bar and appends new ones, and a
+ * chip is clickable only while its column has exactly one value per bar. A
+ * closed bar therefore arrives with no indicator value of its own — the honest
+ * answer until the next full fetch recomputes it — so pad with nulls rather than
+ * shifting the older values onto newer bars.
+ * @param series - the payload's per-bar columns.
+ * @param bars - how many bars the payload now carries.
+ * @returns columns of exactly `bars` length, or undefined when there are none.
+ */
+export function alignSeries(
+  series: Record<string, (number | null)[]> | undefined,
+  bars: number,
+): Record<string, (number | null)[]> | undefined {
+  if (series === undefined) return undefined
+  const out: Record<string, (number | null)[]> = {}
+  for (const [name, values] of Object.entries(series)) {
+    if (values.length === bars) {
+      out[name] = values
+      continue
+    }
+    out[name] = values.length > bars
+      // Fewer bars than values: keep the most recent values, which line up with
+      // the bars that survived.
+      ? values.slice(values.length - bars)
+      // More bars than values: the extra bars are at the END, so their indicator
+      // value is unknown until the next full fetch — pad there, never at the front,
+      // or every historical value would shift onto a later bar.
+      : [...values, ...Array<number | null>(bars - values.length).fill(null)]
+  }
+  return out
+}
+
 export function withCandles(payload: ChartPayload, candles: Candle[]): ChartPayload {
   const tf = payload.timeframes[0]
   if (tf === undefined || tf.candles === candles) return payload
-  return { ...payload, timeframes: [{ ...tf, candles }, ...payload.timeframes.slice(1)] }
+  const series = alignSeries(tf.series, candles.length)
+  const next = { ...tf, candles, ...series === undefined ? {} : { series } }
+  return { ...payload, timeframes: [next, ...payload.timeframes.slice(1)] }
 }
 
 /**
