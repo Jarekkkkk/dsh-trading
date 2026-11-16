@@ -44,6 +44,27 @@ the walkthrough player uses to remember performed sections — hence the `before
 clear in `packages/client-chart/test/walkthrough.test.ts`. Keep tests independent of
 runtime web-storage support; do not reintroduce cross-test state.
 
+## How the profile consumes this checkout
+
+`~/.dsh/profiles/trading` no longer installs the published packages. Its
+`package.json` keeps `@dsh-trading/bundle` (for the row wiring) and adds the six
+packages as `link:` dependencies:
+
+    "@dsh-trading/tool-market": "link:/Users/jareklin/dev/research/dsh-trading/packages/tool-market"
+    ...client-chart, market-data, provider-csv, risk-guard, verdict
+
+So the profile points at `lib/` in this checkout, live. After changing source:
+
+    pnpm build            # in this repo
+    # restart the workbench — no reinstall needed
+
+The old exact-version exemptions are gone: the packages now declare
+`@deepseek-ai/dsh-tools@0.2.2-rc.3`, matching the local runtime, so the loader accepts
+them without `compatibility.json`.
+
+`psp` note: pnpm `file:` overrides copy the package; `link:` symlinks it. Use `link:`
+or every edit needs a reinstall.
+
 ## Known upstream defects we inherited
 
 - `pnpm typecheck` fails on a clean clone (no build dependency, no TS project references).
