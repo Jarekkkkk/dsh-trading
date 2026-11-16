@@ -118,8 +118,24 @@ export function apply(ctx: ClientContext): void {
   // `ctx.connection` is provided by dsh-client-connection; read it through
   // ctx.get so this package need not merge that plugin's Context augmentation
   // into a compilation that deliberately runs with `types: []`.
-  const connection = ctx.get('connection') as ConnectionHandle
-  const market = createMarketClient(connection.rpc)
+  // The host registers exact Fetch routes (see the package's host half), so the panel
+  // posts to them directly. `connection.rpc` is deliberately NOT used: in dsh 0.2.x a
+  // channel registered that way never reached the HTTP server, and every panel call
+  // failed with "transport failure for /dsh-trading-market/ohlcv: HTTP 405".
+  const fetchCaller = {
+    async call(channel: string, endpoint: string, payload: unknown): Promise<unknown> {
+      const response = await fetch(`${channel}/${endpoint}`.replace(/^\//, ''), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload ?? {}),
+      })
+      if (!response.ok) {
+        throw new Error(`transport failure for ${channel}/${endpoint}: HTTP ${response.status}`)
+      }
+      return await response.json()
+    },
+  }
+  const market = createMarketClient(fetchCaller as unknown as Parameters<typeof createMarketClient>[0])
 
   // dsh 0.2.x ships a right sidebar whose tabs are a registry, not a fixed set: a plugin
   // registers a tab *kind* plus the body keyed by that kind. That is the sanctioned way to

@@ -18,11 +18,11 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { ConnectionRpcHandler, HostConnectionHandle } from '@deepseek-ai/dsh-client-connection'
+import type { HostConnectionHandle } from '@deepseek-ai/dsh-client-connection'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { ChartView, MarketDataLike } from './market-rpc.js'
-import { describeChartView, MARKET_CHANNEL, serveMarketEndpoint } from './market-rpc.js'
+import { describeChartView, ENDPOINTS, MARKET_CHANNEL, serveMarketEndpoint } from './market-rpc.js'
 
 export {
   describeChartView,
@@ -68,7 +68,10 @@ export function apply(ctx: Context): void {
   const liveView = (): ChartView | undefined =>
     view !== undefined && Date.now() - viewAt <= VIEW_TTL_MS ? view : undefined
 
-  const makeHandler = (marketData: MarketDataLike): ConnectionRpcHandler => async (endpoint, payload) => {
+  // Typed locally rather than as ConnectionRpcHandler: that alias carries peer and
+  // signal parameters the fetch route never has, and its arity moved between rcs.
+  const makeHandler = (marketData: MarketDataLike) =>
+    async (endpoint: string, payload: unknown): Promise<unknown> => {
     try {
       return {
         ok: true,
@@ -178,10 +181,30 @@ export function apply(ctx: Context): void {
     const connection = scoped.get('connection') as HostConnectionHandle
     const marketData = scoped.get('marketData') as MarketDataLike
 
+    // Exact Fetch routes, not `connection.rpc.handle`: in dsh 0.2.x a channel
+    // registered through the rpc registry never reaches the HTTP server (the panel
+    // got "HTTP 405" for every call), while the fetch registry is what dsh's own
+    // routes use (`GET /api/file`, the file-upload POST). One exact route per
+    // endpoint, all POST, buffered body.
+    const handle = makeHandler(marketData)
     scoped.effect(() => {
-      const dispose = connection.rpc.handle(MARKET_CHANNEL, makeHandler(marketData), { authority: 'loopback' })
+      const registered = Object.values(ENDPOINTS).map(endpoint =>
+        connection.fetch.register({
+          path: `${MARKET_CHANNEL}/${endpoint}`,
+          methods: ['POST'],
+          requestBody: 'buffered',
+          fetch: async (request: Request) => {
+            let payload: unknown = null
+            try {
+              payload = await request.json()
+            } catch {
+              payload = null
+            }
+            return Response.json(await handle(endpoint, payload))
+          },
+        }))
       return () => {
-        void dispose()
+        for (const dispose of registered) void dispose()
       }
     }, 'client-chart: market data channel')
   })
