@@ -46,9 +46,15 @@ export interface Config {
   chartDir: string
 }
 
-export const Config: z<Config> = z.object({
+/**
+ * Asserted rather than inferred: schemastery 3.19 splits a schema's input type from its
+ * output type, so an unannotated `.default()` field reads as `T | Volatile<T>` and the
+ * inferred schema type cannot be named in a emitted `.d.ts` under pnpm's layout. Nothing
+ * here opts into `.volatile()`, and dsh resolves defaults before `apply`.
+ */
+export const Config = z.object({
   chartDir: z.string().default('./charts'),
-})
+}) as z<Config>
 
 const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'] as const
 

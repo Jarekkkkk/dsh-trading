@@ -36,11 +36,17 @@ export interface Config {
   allow: string[]
 }
 
-export const Config: z<Config> = z.object({
+/**
+ * Asserted rather than inferred: schemastery 3.19 splits a schema's input type from its
+ * output type, so an unannotated `.default()` field reads as `T | Volatile<T>` and the
+ * inferred schema type cannot be named in an emitted `.d.ts` under pnpm's layout. Nothing
+ * here opts into `.volatile()`, and dsh resolves defaults before `apply`.
+ */
+export const Config = z.object({
   mode: z.union(['denylist', 'allowlist'] as const).default('denylist'),
   deny: z.array(z.string()).default([...DEFAULT_DENY_PATTERNS]),
   allow: z.array(z.string()).default([]),
-})
+}) as z<Config>
 
 export function apply(ctx: Context, config: Config): void {
   const verdict = compilePolicy(config)

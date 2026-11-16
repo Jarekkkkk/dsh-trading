@@ -56,10 +56,16 @@ export interface Config {
   seed: number
 }
 
-export const Config: z<Config> = z.object({
+/**
+ * Asserted rather than inferred: schemastery 3.19 splits a schema's input type from its
+ * output type, so an unannotated `.default()` field reads as `T | Volatile<T>` and the
+ * inferred schema type cannot be named in an emitted `.d.ts` under pnpm's layout. Nothing
+ * here opts into `.volatile()`, and dsh resolves defaults before `apply`.
+ */
+export const Config = z.object({
   simulations: z.number().default(1000),
   seed: z.number().default(42),
-})
+}) as z<Config>
 
 /** Cap on strategy source files read per call. */
 const MAX_CODE_FILES = 16
