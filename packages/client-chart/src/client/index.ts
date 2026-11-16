@@ -10,9 +10,11 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 // scope. Same pattern as the ui-tool dependency above — a slot contract, not a
 // runtime import, so a profile without the frame still loads this plugin.
 import type {} from '@dsh-trading/client-frame/client'
+import { createElement, useEffect, useRef, useState } from 'react'
 import { ChartCard } from './ChartCard.js'
 import { ChartPanel } from './ChartPanel.js'
 import { createMarketClient } from './market-client.js'
+import type { MarketClient } from './market-client.js'
 import { WalkthroughCard } from './WalkthroughCard.js'
 
 // The ecosystem seam: third-party dsh client plugins require
@@ -23,6 +25,35 @@ export { registerAnnotationRenderer } from './ChartCard.js'
 export type { AnnotationRenderer, AnnotationRendererContext, DrawPrimitive } from './ChartCard.js'
 export type { ChartAnnotation, ChartPayload, ChartScenario, ChartTimeframeData } from './payload.js'
 
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /**
+     * One right-sidebar pane body (dsh >= 0.2). Keyed by tab kind, session scoped:
+     * the sidebar registers tab *types* and this plugin supplies the body named by
+     * the kind. Declared here rather than upstream because dsh does not publish the
+     * key in its client typings — only its own sidebar packages use it.
+     */
+    'sidebar.right.pane.tab': { kind: 'keyed'; scope: 'session'; owner: { market: MarketClient } }
+  }
+}
+
+/**
+ * The sidebar tab body: the same column the trading frame seats, sized by its host
+ * rather than by the frame (no frame is mounted here).
+ */
+function SidebarChart(props: { market: MarketClient }): JSX.Element {
+  const [width, setWidth] = useState(640)
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    const observer = new ResizeObserver(() => { if (el.clientWidth > 0) setWidth(el.clientWidth) })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  return createElement('div', { ref, style: { height: '100%', overflow: 'auto' } },
+    createElement(ChartPanel, { width, market: props.market }))
+}
 export const name = 'client-chart'
 export const inject = ['slots', 'connection']
 
@@ -83,6 +114,57 @@ export function apply(ctx: ClientContext): void {
   // into a compilation that deliberately runs with `types: []`.
   const connection = ctx.get('connection') as ConnectionHandle
   const market = createMarketClient(connection.rpc)
+
+  // dsh 0.2.x ships a right sidebar whose tabs are a registry, not a fixed set: a plugin
+  // registers a tab *kind* plus the body keyed by that kind. That is the sanctioned way to
+  // put a persistent chart beside the conversation without replacing the shell (which
+  // client-frame does — and which a version bump broke catastrophically).
+  const withTabs = (): void => {
+    const tabKind = 'trading.chart'
+    const sidebar = ctx.get('sidebarRight') as {
+      openTab?(kind: string, options?: unknown): unknown
+      isExpanded?(): boolean
+      toggleExpanded?(): void
+    } | undefined
+    const tabs = ctx.get('sidebarRightTabs') as { register(definition: unknown): () => void } | undefined
+    if (tabs === undefined) return
+    // The pane resolves its body by the tab record's id OR its kind depending on how the
+    // record was minted; claim both so either lookup finds us.
+    const tabId = '@dsh-trading/client-chart/chart'
+    ctx.slots.inject('sidebar.right.pane.tab', () => [tabKind, tabId].map(key =>
+      ctx.slots.register(
+        { name: 'sidebar.right.pane.tab', key, registrant: '@dsh-trading/client-chart', inject: () => ({ market }) },
+        SidebarChart,
+      )))
+    try {
+      tabs.register({ id: tabId, kind: tabKind, priority: 'builtin', title: () => 'Chart' })
+    } catch (error) {
+      console.warn('[client-chart] could not register the chart tab', error)
+      return
+    }
+    // openTab refuses until a conversation surface is mounted, and dsh publishes no event
+    // for that, so retry a bounded number of times before giving up.
+    let remaining = 30
+    let last = ''
+    const open = (): void => {
+      try {
+        sidebar?.openTab?.(tabKind, { replaceTab: true })
+        // A tab in a collapsed right bar is a tab nobody sees: ask for the column too.
+        if (sidebar?.isExpanded?.() === false) sidebar.toggleExpanded?.()
+        console.info('[client-chart] chart tab opened')
+      } catch (error) {
+        last = error instanceof Error ? error.message : String(error)
+        if (remaining-- > 0) setTimeout(open, 2000)
+        else console.warn('[client-chart] gave up opening the chart tab:', last)
+      }
+    }
+    open()
+  }
+  // Services resolve lazily: this apply can run before the sidebar provides its registry.
+  const injectDeps = (ctx as unknown as { inject?: (deps: string[], run: () => void) => void }).inject
+  if (typeof injectDeps === 'function') injectDeps.call(ctx, ['sidebarRightTabs'], withTabs)
+  else withTabs()
+
   ctx.slots.inject('trading.chart', () => [
     ctx.slots.register(
       {
