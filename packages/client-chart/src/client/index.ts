@@ -122,24 +122,20 @@ export function apply(ctx: ClientContext): void {
   // posts to them directly. `connection.rpc` is deliberately NOT used: in dsh 0.2.x a
   // channel registered that way never reached the HTTP server, and every panel call
   // failed with "transport failure for /dsh-trading-market/ohlcv: HTTP 405".
-  // The host intercepts /api for our endpoints. Post the client-request envelope the
-  // connection transport expects, and read the rpc envelope back (result/error), so the
-  // panel sees the same shape it got from ctx.connection.rpc.call before the 0.2.x move.
+  // The host claims exact Fetch routes under /api, so the panel posts plain JSON to
+  // /api/<channel>/<endpoint> and reads the handler's { ok, value } | { ok: false, error }
+  // answer — the same shape ctx.connection.rpc.call returned before the 0.2.x move.
   const fetchCaller = {
     async call(channel: string, endpoint: string, payload: unknown): Promise<unknown> {
-      const response = await fetch(`/api/${channel}/${endpoint}`, {
+      const response = await fetch(`/api${channel}/${endpoint}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ type: 'client-request', rpcId: String(Math.random()), method: endpoint, payload: payload ?? {} }),
+        body: JSON.stringify(payload ?? {}),
       })
       if (!response.ok) {
         throw new Error(`transport failure for ${channel}/${endpoint}: HTTP ${response.status}`)
       }
-      const body = await response.json() as { result?: unknown; error?: unknown }
-      if (body.error !== undefined) {
-        throw new Error(typeof body.error === 'object' && body.error !== null && 'message' in (body.error as object) ? String((body.error as { message: unknown }).message) : String(body.error))
-      }
-      return body.result
+      return await response.json()
     },
   }
   const market = createMarketClient(fetchCaller as unknown as Parameters<typeof createMarketClient>[0])

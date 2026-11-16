@@ -181,22 +181,34 @@ export function apply(ctx: Context): void {
     const connection = scoped.get('connection') as HostConnectionHandle
     const marketData = scoped.get('marketData') as MarketDataLike
 
-    // dsh 0.2.x: all RPC rides the shared /api channel. `rpc.handle(MARKET_CHANNEL)`
-    // mounts a prefix route on a path the /api owner never forwards to (the panel
-    // got HTTP 405), and `fetch.register(MARKET_CHANNEL/...)` is refused outright
-    // ("invalid exact Fetch route" — exact routes must live under /api). The
-    // sanctioned seam is what dsh's own gateway uses: `rpc.intercept('/api',`
-    // claim the endpoints this plugin owns, and the handler answers them.
+    // dsh 0.2.x exposes plugin HTTP through the shared /api surface, and the exact
+    // Fetch registry is the only seam a third-party row can claim:
+    //   - `rpc.handle(MARKET_CHANNEL)` mounts a prefix route the /api owner never
+    //     forwards to — every call answered 405;
+    //   - `rpc.intercept('/api', ...)` is single-owner and dsh's own api-gateway
+    //     already holds it (registerInterceptor throws);
+    //   - `fetch.register` REQUIRES the path to live under /api (assertFetchRoute
+    //     calls endpointFromPath('/api', path) and throws when it is undefined).
+    // So: one exact route per endpoint, under /api, POST, buffered body.
     const handle = makeHandler(marketData)
-    const marketPrefix = 'dsh-trading-market'
     scoped.effect(() => {
-      const dispose = (connection.rpc as unknown as {
-        intercept?: (channel: string, matches: (endpoint: string) => boolean, handler: (endpoint: string, payload: unknown) => Promise<unknown>) => () => void
-      }).intercept?.call(connection.rpc, '/api',
-        endpoint => endpoint.startsWith(`${marketPrefix}/`),
-        (endpoint, payload) => handle(endpoint.slice(marketPrefix.length + 1), payload))
+      const registered = Object.values(ENDPOINTS).map(endpoint =>
+        connection.fetch.register({
+          path: `/api${MARKET_CHANNEL}/${endpoint}`,
+          methods: ['POST'],
+          requestBody: 'buffered',
+          fetch: async (request: Request) => {
+            let payload: unknown = null
+            try {
+              payload = await request.json()
+            } catch {
+              payload = null
+            }
+            return Response.json(await handle(endpoint, payload))
+          },
+        }))
       return () => {
-        void dispose?.()
+        for (const dispose of registered) void dispose()
       }
     }, 'client-chart: market data channel')
   })
