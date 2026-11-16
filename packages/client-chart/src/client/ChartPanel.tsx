@@ -160,6 +160,38 @@ function messageText(node: SessionNode): string {
     .join(' ')
 }
 
+const LAST_CHART_KEY = 'dsh-trading:chart-last'
+
+/**
+ * The symbol and interval the reader last put on this panel.
+ *
+ * The panel's own choice is React state, so it dies with the page — a restart,
+ * or even a reload, left the column empty and the reader hunting for the
+ * instrument again. Only a deliberate pick is remembered: a chart the agent
+ * published is reproduced from the conversation, and pinning that as the
+ * starting point would make every restart open on last week's analysis.
+ */
+function readLastChart(): { symbol: string; timeframe: string } | null {
+  try {
+    const raw = localStorage.getItem(LAST_CHART_KEY)
+    if (raw === null) return null
+    const value = JSON.parse(raw) as { symbol?: unknown; timeframe?: unknown }
+    if (typeof value.symbol !== 'string' || value.symbol === '' || typeof value.timeframe !== 'string') return null
+    return { symbol: value.symbol, timeframe: value.timeframe }
+  } catch {
+    return null
+  }
+}
+
+/** Remember the reader's pick; a tab that cannot store simply starts empty. */
+function rememberLastChart(symbol: string, timeframe: string): void {
+  try {
+    localStorage.setItem(LAST_CHART_KEY, JSON.stringify({ symbol, timeframe }))
+  } catch {
+    // Private mode or a full store is not an error worth surfacing.
+  }
+}
+
 /**
  * The chart column body.
  * @param width - resolved column width; 0 means the frame closed the column.
@@ -273,6 +305,7 @@ export function ChartPanel(
       const next = await market.getPayload(symbol, tf, controller.signal)
       if (!controller.signal.aborted) {
         setOwn(next)
+        if (trigger === 'user') rememberLastChart(symbol, tf)
         ownOrigin.current = trigger === 'user' ? 'user' : 'followed'
         // Always clear a stale error on success, whoever asked. `error`
         // outranks the chart in the render ladder, so leaving one set would
@@ -593,6 +626,21 @@ export function ChartPanel(
   // fetch was in flight, and was silently discarded if the fetch failed — the
   // next submit would then use a period the toolbar was no longer showing.
   const activeTimeframe = busy || error !== null ? timeframe : shownTimeframe ?? timeframe
+
+  // Reopen on whatever the reader last put here. Runs once: after this the panel
+  // belongs to the conversation again (agent charts, walkthroughs, live tail).
+  const restored = useRef(false)
+  useEffect(() => {
+    if (restored.current) return
+    restored.current = true
+    if (fromAgent !== null) return
+    const last = readLastChart()
+    if (last === null) return
+    setDraft(last.symbol)
+    setTimeframe(last.timeframe)
+    void load(last.symbol, last.timeframe)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design
+  }, [])
 
   const submit = (e: FormEvent): void => {
     e.preventDefault()
