@@ -992,6 +992,7 @@ export function apply(ctx: Context, config: Config): void {
         properties: {
           symbol: { type: 'string', required: true },
           timeframe: { type: 'string', required: true },
+          close: { type: 'number', required: true },
           verdict: { type: 'string', required: true },
           reason: { type: 'string', required: true },
           atr: { type: 'json', required: true },

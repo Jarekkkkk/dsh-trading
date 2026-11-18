@@ -1,25 +1,16 @@
-feat(tool-market): audit_energy_decay — test his one quantified claim
+fix(tool-market): declare judge_setup's close, and guard the class of bug
 
-'breaks release their strongest energy within 5-10 bars, rarely beyond' is the
-only part of the method stated numerically, so it is the only part we can falsify.
-The tool finds confirmed fractal swings, takes the first bar that CLOSES beyond
-one, measures where the favourable excursion peaks over a fixed horizon, and
-reports the distribution with its blind spots.
+judge_setup shipped without declaring `close` in its output schema, so every call
+was rejected at runtime with additionalProperties:false. That is the second tool in
+a row with the same defect (cross_asset lost from/to/first/min/max), and unit tests
+cannot see it: they call the pure function and never touch the registered schema.
 
-On 10 years of daily data the claim does not survive, on four commodities:
+So the fix is two-part: declare the field, and add a text-level guard that reads
+src/index.ts, extracts each tool's declared output properties, and asserts the set
+matches exactly what the implementation returns. Four tools covered
+(judge_setup, cross_asset, market_structure, audit_energy_decay).
 
-  GC=F  379 breaks: 21.4% peak inside bars 5-10, 44.6% after bar 10, median 9
-  SI=F  437 breaks: 18.3% inside 5-10, 42.3% after 10, median 8
-  CL=F  438 breaks: 20.5% inside 5-10, 44.7% after 10, median 9
-  HG=F  447 breaks: 17.0% inside 5-10, 45.6% after 10, median 9
+Deliberately a source-text check: the schemas are object literals inside apply(),
+so this is the only place the seam can be verified without booting a host.
 
-So the narrow window is wrong in both directions, while the loose shape (median
-peak around bar 9, i.e. energy concentrates early) survives. Reporting that split
-is the point of the tool: it is evidence, not agreement.
-
-The verdict rule had to change once real data arrived: a sample that contradicts
-both halves of a claim is NOT_SUPPORTED, not NOT_PROVEN — absence of evidence and
-evidence against are different answers.
-
-Tri-state, deterministic, and it still refuses to conclude under 30 events.
-34 test files, 548 tests.
+35 test files, 552 tests.
