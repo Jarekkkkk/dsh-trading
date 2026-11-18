@@ -34,7 +34,7 @@ export type GateStatus = 'pass' | 'veto' | 'unknown'
 
 /** A gate, with the evidence behind its status. */
 export type Gate = {
-  id: 'data' | 'alignment' | 'three-piece' | 'direction' | 'structure' | 'risk-reward' | 'cross-asset' | 'unavailable'
+  id: 'data' | 'alignment' | 'three-piece' | 'trend-side' | 'direction' | 'structure' | 'risk-reward' | 'cross-asset' | 'unavailable'
   status: GateStatus
   /** One line a reader can check. */
   detail: string
@@ -182,6 +182,32 @@ export function reviewSetup(input: {
   const adxValues = adx(candles)
   const adxV = adxValues.adx[adxValues.adx.length - 1] ?? null
   const reading = regimeReading(k[k.length - 1] ?? null, adxV)
+  // 3. Trend side: ADX >= 20 means a trend exists, and +DI/-DI say which way it runs.
+  //
+  // This gate exists because a back-test against his own published posts caught the
+  // framework approving a long at the top of an oversold bounce (gold, 2026-11-13,
+  // -DI 30.4 vs +DI 15.4) purely because Stoch sat at 20.96 — one point above the
+  // extreme band. The regime gate below only fires on an extreme reading, so a
+  // counter-trend proposal could sail through whenever the oscillator happened to
+  // rest just inside the band. Direction in his framework comes from channel and
+  // structure; leaving it to an oscillator threshold inverted the emphasis.
+  const dom = adxV !== null && adxV >= 20
+    ? (adxValues.plusDi[adxValues.plusDi.length - 1] ?? 0) >= (adxValues.minusDi[adxValues.minusDi.length - 1] ?? 0) ? 'up' : 'down'
+    : null
+  if (dom === null) {
+    gates.push({ id: 'trend-side', status: 'pass', detail: `no trend to be against (ADX ${adxV === null ? '–' : adxV.toFixed(1)} < 20), so DI direction is not a veto — range trades are decided by the regime gate below` })
+  } else if ((proposal.direction === 'long' && dom === 'down') || (proposal.direction === 'short' && dom === 'up')) {
+    const plus = adxValues.plusDi[adxValues.plusDi.length - 1] ?? null
+    const minus = adxValues.minusDi[adxValues.minusDi.length - 1] ?? null
+    gates.push({
+      id: 'trend-side',
+      status: 'veto',
+      detail: `${proposal.direction} is against the established trend: ADX ${adxV!.toFixed(1)} with ${dom === 'down' ? '-DI' : '+DI'} dominant (+${plus === null ? '–' : plus.toFixed(1)} / -${minus === null ? '–' : minus.toFixed(1)}) — direction comes from channel and structure, not from an oscillator`,
+    })
+  } else {
+    gates.push({ id: 'trend-side', status: 'pass', detail: `${proposal.direction} is with the dominant ${dom === 'up' ? '+DI' : '-DI'} (ADX ${adxV!.toFixed(1)})` })
+  }
+
   const stretch = reading.extreme !== null
   const wantsReversion = proposal.direction === 'long' ? reading.extreme === 'oversold' : reading.extreme === 'overbought'
   if (reading.color === null) {

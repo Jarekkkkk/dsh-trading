@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Candle } from '@dsh-trading/market-data'
 import { alignmentGate, renderSetup, reviewSetup } from '../src/setup.js'
+import { findSwings } from '../src/structure.js'
 
 const day = (n: number): string => new Date(Date.UTC(2026, 0, 1 + n)).toISOString()
 
@@ -121,5 +122,71 @@ describe('gate identity', () => {
   it('names the deciding gate in the reason, so a reader knows which rule closed it', () => {
     const r = reviewSetup({ ...base, proposal: { direction: 'short', entry: 60, invalidation: 70, targets: [] } })
     expect(r.reason).toMatch(/^three-piece: /)
+  })
+})
+
+describe('trend-side gate (regression: the 2026-11-13 gold miss)', () => {
+  /** A steady decline: ADX high, -DI dominant, and stochastic pinned low ONLY if deep enough. */
+  function declining(n = 80, step = -0.5, start = 200): Candle[] {
+    return Array.from({ length: n }, (_, i) => {
+      const close = start + step * i
+      return { time: day(i), open: close, high: close + 0.2, low: close - Math.abs(step) * 2, close, volume: 1 }
+    })
+  }
+
+  it('vetoes a long against a dominant -DI even when the oscillator is NOT extreme', () => {
+    const r = reviewSetup({
+      symbol: 'GC=F', timeframe: '1d', candles: declining(),
+      proposal: { direction: 'long', entry: 170, invalidation: 160, targets: [190] },
+    })
+    const gate = r.gates.find(g => g.id === 'trend-side')!
+    expect(gate.status).toBe('veto')
+    expect(gate.detail).toMatch(/against the established trend/)
+    expect(r.verdict).toBe('stand aside')
+    expect(r.reason).toMatch(/^trend-side: /)
+  })
+
+  it('allows a short with the dominant -DI', () => {
+    const r = reviewSetup({
+      symbol: 'GC=F', timeframe: '1d', candles: declining(),
+      proposal: { direction: 'short', entry: 170, invalidation: 180, targets: [150] },
+    })
+    expect(r.gates.find(g => g.id === 'trend-side')!.status).toBe('pass')
+  })
+
+  it('leaves a range alone: without a trend, DI direction is not a veto', () => {
+    // oscillating series with no directional persistence -> ADX low
+    const bars = Array.from({ length: 80 }, (_, i) => ({
+      time: day(i), open: 100, high: 102, low: 98, close: 100 + (i % 2 === 0 ? 0.5 : -0.5), volume: 1,
+    }))
+    const r = reviewSetup({
+      symbol: 'RANGE', timeframe: '1d', candles: bars,
+      proposal: { direction: 'long', entry: 99, invalidation: 97, targets: [104] },
+    })
+    const gate = r.gates.find(g => g.id === 'trend-side')!
+    expect(gate.status).toBe('pass')
+    expect(gate.detail).toMatch(/no trend to be against/)
+  })
+})
+
+describe('the tool can actually say act', () => {
+  it('returns act when every checkable gate passes', () => {
+    // three explicit segments so the series ENDS rising (a sine tail can leave -DI
+    // dominant, which would be a legitimate trend-side veto and not a full pass):
+    // up, a pullback that mints a confirmed swing low, then up again.
+    const closes: number[] = []
+    for (let i = 0; i < 100; i++) closes.push(100 + 0.5 * i)
+    for (let i = 0; i < 6; i++) closes.push(closes[closes.length - 1]! - 1.5)
+    for (let i = 0; i < 20; i++) closes.push(closes[closes.length - 1]! + 2)
+    const bars = closes.map((close, i) => ({
+      time: day(i), open: close, high: close + 0.8, low: close - 0.8, close, volume: 1,
+    }))
+    const low = findSwings(bars).filter(s => s.kind === 'low').pop()!
+    const close = bars[bars.length - 1]!.close
+    const r = reviewSetup({
+      symbol: 'UP', timeframe: '1d', candles: bars, higherTimeframe: bars,
+      proposal: { direction: 'long', entry: low.price + 0.5, invalidation: low.price - 2, targets: [close + 15] },
+    })
+    expect(r.verdict).toBe('act')
   })
 })

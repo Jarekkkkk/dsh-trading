@@ -1,18 +1,25 @@
-fix(tool-market): the alignment gate reports its own id, not data
+fix(tool-market): a trend has a side, and the judge must check it
 
-The first live judge_setup run printed two gates both labelled `data`: the timeframe
-gate was returning id 'data' because the Gate union had no 'alignment' member, so the
-verdict named the wrong rule and the reader could not tell the two apart.
+Back-testing our own judge_setup against his published posts (163, 2026-11-13)
+exposed a hole: it approved a LONG at the top of an oversold bounce in gold while
+-DI 30.4 dominated +DI 15.4 at ADX 25.5. It passed because the only direction check
+was the four-colour regime gate, which fires ONLY when stochastic sits inside an
+extreme band — that day Stoch was 20.96, one point above it.
 
-Now the gate owns its id, and the verdict prefixes the deciding gate ('alignment: ...',
-'three-piece: ...') so a reader knows which rule closed the door.
+So the gate silently depended on an oscillator threshold sitting in the right place.
+Rereading the two later posts (11-16, 11-17) the same proposal was vetoed, purely
+because Stoch had fallen to 8.3 — the tool's verdict was decided by an accident of
+where the oscillator rested, not by the trend.
 
-Also states his step-1 branches properly instead of folding them into one line: with
-weekly < 20 and daily >= 20 the corpus permits SHORT-TERM ONLY (no held position), and
-that depends on a holding period this tool is not told — so it reports the rule as
-UNKNOWN rather than inventing a verdict on the caller's behalf.
+New gate 'trend-side': when ADX >= 20 a trend exists, and +DI/-DI name its side, so
+a proposal against the dominant DI is vetoed outright. Below ADX 20 there is no side
+to be against and the gate stands aside, leaving range trades to the regime gate.
 
-Three new tests, including 'never emits two gates with the same id' — the defect that
-only showed up when a real proposal ran through every gate at once.
+Regression: gold 2026-11-13 long @4136 now returns STAND ASIDE (was ACT), matching
+his own call that day ('not an uptrend yet, at most an oversold bounce'). All three
+article dates now agree with him.
 
-35 test files, 555 tests.
+Also adds the test the suite was missing: proof that the tool can return ACT at all.
+Without it, a judge that only ever refuses looks rigorous while being broken.
+
+35 test files, 559 tests.
