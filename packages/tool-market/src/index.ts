@@ -16,6 +16,7 @@ import { ema, macd } from './candle-indicators.js'
 import { rsi, sma } from './indicators.js'
 import { regimeSnapshot, renderSnapshot } from './regime.js'
 import { describeCrossAsset, joinLegs, renderCrossAsset } from './cross-asset.js'
+import { renderStructure, structureReport } from './structure.js'
 import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
 import { chartCandles, chartSeries, regimeSeries, roundSeries } from './chart-payload.js'
@@ -28,6 +29,8 @@ export { adx, atr, bollinger, ema, macd, mfi, stochastic } from './candle-indica
 export { regimeSnapshot, renderSnapshot } from './regime.js'
 export { regimeLabel, regimeReading, REGIME_DEFAULTS } from './regime-color.js'
 export { describeCrossAsset, joinLegs, renderCrossAsset, MIN_BARS_FOR_PERCENTILE } from './cross-asset.js'
+export { findFailedBreak, findSwings, nearestLevels, renderStructure, structureReport, windowOf, DEFAULT_WINDOWS } from './structure.js'
+export type { FailedBreak, StructureLevel, StructureReport, Swing, Window } from './structure.js'
 export type { CrossAssetResult, Leg, RatioPoint } from './cross-asset.js'
 export type { RegimeBaseline, RegimeColor, RegimeExtreme, RegimeOptions, RegimeReading } from './regime-color.js'
 export type { RegimeSnapshot } from './regime.js'
@@ -886,6 +889,66 @@ export function apply(ctx: Context, config: Config): void {
     presentCall: args => ({
       card: 'generic',
       title: `Cross-asset: ${args.denominator === undefined ? args.numerator : `${args.numerator}/${args.denominator}`}`,
+      kind: 'read',
+      rawInput: args,
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'market_structure',
+    description:
+      'Locate the structure that already printed: confirmed fractal swing highs/lows, the nearest level on each '
+      + 'side of the close with its distance, range width and least-squares slope over 20/50/100 bars, and the '
+      + 'most recent failed break (price pierced a level then closed back inside — his 假突破). '
+      + 'Every level states how it was found, because a support number without provenance is an opinion. '
+      + 'A swing needs 3 bars on each side that did not exceed it, so a level can never exist in the last 3 bars: '
+      + 'that is lookahead, not structure. Nothing here is projected — no targets, no measured moves.',
+    parameters: {
+      symbol: { type: 'string', required: true, description: 'Instrument symbol exactly as list_symbols reports it.' },
+      timeframe: { type: 'string', required: true, description: 'Bar interval to read structure on.', enum: [...TIMEFRAMES] },
+      bars: { type: 'integer', description: 'Bars to read (default 300, max 2000). More bars means older swings.' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          symbol: { type: 'string', required: true },
+          timeframe: { type: 'string', required: true },
+          close: { type: 'number', required: true },
+          resistance: { type: 'json', required: true },
+          support: { type: 'json', required: true },
+          failedBreak: { type: 'json', required: true },
+          text: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text as string }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const limit = Math.min(MAX_OHLCV_BARS, Math.max(20, args.bars ?? 300))
+      const candles = await provider.getOhlcv({
+        symbol: args.symbol,
+        timeframe: args.timeframe as Timeframe,
+        limit,
+      })
+      if (candles.length === 0) throw new Error(`no candles for ${args.symbol} @ ${args.timeframe}`)
+      const report = structureReport(candles, args.timeframe)
+      return {
+        symbol: args.symbol,
+        timeframe: args.timeframe,
+        close: report.close,
+        resistance: report.resistance,
+        support: report.support,
+        failedBreak: report.failedBreak,
+        text: `${args.symbol} @ ${renderStructure(report)}`,
+      }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Structure: ${args.symbol} ${args.timeframe}`,
       kind: 'read',
       rawInput: args,
     }),
