@@ -34,7 +34,7 @@ export type GateStatus = 'pass' | 'veto' | 'unknown'
 
 /** A gate, with the evidence behind its status. */
 export type Gate = {
-  id: 'data' | 'three-piece' | 'direction' | 'structure' | 'risk-reward' | 'cross-asset' | 'unavailable'
+  id: 'data' | 'alignment' | 'three-piece' | 'direction' | 'structure' | 'risk-reward' | 'cross-asset' | 'unavailable'
   status: GateStatus
   /** One line a reader can check. */
   detail: string
@@ -107,25 +107,32 @@ export function alignmentGate(fast: readonly Candle[], slow: readonly Candle[]):
   const f = read(fast)
   const s = read(slow)
   if (f.adx === null || s.adx === null) {
-    return { id: 'data', status: 'unknown', detail: 'not enough bars to read ADX on both timeframes' }
+    return { id: 'alignment', status: 'unknown', detail: 'not enough bars to read ADX on both timeframes' }
   }
   const trending = f.adx >= 20 && s.adx >= 20
   if (!trending) {
+    // His step 1 is explicit: weekly < 20 with daily >= 20 means short-term only,
+    // do not hold; both < 20 means do not trade. Which one applies depends on the
+    // holding period the caller intends, and the tool cannot know that — so it
+    // reports the rule rather than picking a verdict on the caller's behalf.
+    const both = f.adx < 20 && s.adx < 20
     return {
-      id: 'data',
+      id: 'alignment',
       status: 'unknown',
-      detail: `ADX too low for a trend read (fast ${f.adx.toFixed(1)}, slow ${s.adx.toFixed(1)}, need both >= 20) — short-term only, per his step 1`,
+      detail: both
+        ? `neither timeframe trends (fast ${f.adx.toFixed(1)}, slow ${s.adx.toFixed(1)}, need both >= 20) — his step 1: do not trade`
+        : `higher timeframe is not trending (slow ${s.adx.toFixed(1)} < 20, fast ${f.adx.toFixed(1)}) — his step 1 permits short-term only, no held trend position; the tool cannot know your intended horizon`,
     }
   }
   if (f.up !== s.up) {
     return {
-      id: 'data',
+      id: 'alignment',
       status: 'veto',
       detail: `timeframes disagree on direction (fast ${f.up ? '+DI' : '-DI'}, slow ${s.up ? '+DI' : '-DI'} dominant) — his rule forbids a trend entry`,
     }
   }
   return {
-    id: 'data',
+    id: 'alignment',
     status: 'pass',
     detail: `both timeframes trending ${f.up ? 'up' : 'down'} (ADX ${f.adx.toFixed(1)} / ${s.adx.toFixed(1)}); this gate only withholds objection, it never picks a side`,
   }
@@ -262,9 +269,9 @@ export function reviewSetup(input: {
       ? 'stand aside'
       : 'act'
   const reason = veto !== undefined
-    ? veto.detail
+    ? `${veto.id}: ${veto.detail}`
     : substantiveUnknown !== undefined
-      ? substantiveUnknown.detail
+      ? `${substantiveUnknown.id}: ${substantiveUnknown.detail}`
       : 'entry, stop and target are complete, at structure, and no gate objects'
 
   return { symbol: input.symbol, timeframe: input.timeframe, close, verdict, reason, gates, riskReward, atr: atrV === null ? null : Number(atrV.toFixed(4)) }

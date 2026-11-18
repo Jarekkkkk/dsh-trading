@@ -1,16 +1,18 @@
-fix(tool-market): declare judge_setup's close, and guard the class of bug
+fix(tool-market): the alignment gate reports its own id, not data
 
-judge_setup shipped without declaring `close` in its output schema, so every call
-was rejected at runtime with additionalProperties:false. That is the second tool in
-a row with the same defect (cross_asset lost from/to/first/min/max), and unit tests
-cannot see it: they call the pure function and never touch the registered schema.
+The first live judge_setup run printed two gates both labelled `data`: the timeframe
+gate was returning id 'data' because the Gate union had no 'alignment' member, so the
+verdict named the wrong rule and the reader could not tell the two apart.
 
-So the fix is two-part: declare the field, and add a text-level guard that reads
-src/index.ts, extracts each tool's declared output properties, and asserts the set
-matches exactly what the implementation returns. Four tools covered
-(judge_setup, cross_asset, market_structure, audit_energy_decay).
+Now the gate owns its id, and the verdict prefixes the deciding gate ('alignment: ...',
+'three-piece: ...') so a reader knows which rule closed the door.
 
-Deliberately a source-text check: the schemas are object literals inside apply(),
-so this is the only place the seam can be verified without booting a host.
+Also states his step-1 branches properly instead of folding them into one line: with
+weekly < 20 and daily >= 20 the corpus permits SHORT-TERM ONLY (no held position), and
+that depends on a holding period this tool is not told — so it reports the rule as
+UNKNOWN rather than inventing a verdict on the caller's behalf.
 
-35 test files, 552 tests.
+Three new tests, including 'never emits two gates with the same id' — the defect that
+only showed up when a real proposal ran through every gate at once.
+
+35 test files, 555 tests.

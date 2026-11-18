@@ -100,3 +100,26 @@ describe('honesty about what is not implemented', () => {
     expect(text).toMatch(/targets are yours/)
   })
 })
+
+describe('gate identity', () => {
+  it('never emits two gates with the same id', () => {
+    const r = reviewSetup({
+      ...base,
+      higherTimeframe: trend(100, 0.01),
+      proposal: { direction: 'short', entry: 60, invalidation: 62, targets: [50] },
+    })
+    const ids = r.gates.map(g => g.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('labels the timeframe gate as alignment, not data', () => {
+    const gate = alignmentGate(trend(100, 0.5), trend(100, -0.5))
+    expect(gate.id).toBe('alignment')
+    expect(gate.status).toBe('veto')
+  })
+
+  it('names the deciding gate in the reason, so a reader knows which rule closed it', () => {
+    const r = reviewSetup({ ...base, proposal: { direction: 'short', entry: 60, invalidation: 70, targets: [] } })
+    expect(r.reason).toMatch(/^three-piece: /)
+  })
+})
