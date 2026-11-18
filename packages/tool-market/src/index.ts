@@ -15,6 +15,7 @@ import type { Candle, Timeframe } from '@dsh-trading/market-data'
 import { ema, macd } from './candle-indicators.js'
 import { rsi, sma } from './indicators.js'
 import { regimeSnapshot, renderSnapshot } from './regime.js'
+import { describeCrossAsset, joinLegs, renderCrossAsset } from './cross-asset.js'
 import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
 import { chartCandles, chartSeries, regimeSeries, roundSeries } from './chart-payload.js'
@@ -26,6 +27,8 @@ export { rsi, sma } from './indicators.js'
 export { adx, atr, bollinger, ema, macd, mfi, stochastic } from './candle-indicators.js'
 export { regimeSnapshot, renderSnapshot } from './regime.js'
 export { regimeLabel, regimeReading, REGIME_DEFAULTS } from './regime-color.js'
+export { describeCrossAsset, joinLegs, renderCrossAsset, MIN_BARS_FOR_PERCENTILE } from './cross-asset.js'
+export type { CrossAssetResult, Leg, RatioPoint } from './cross-asset.js'
 export type { RegimeBaseline, RegimeColor, RegimeExtreme, RegimeOptions, RegimeReading } from './regime-color.js'
 export type { RegimeSnapshot } from './regime.js'
 export { chartHtml, renderChartSvg } from './chart.js'
@@ -816,6 +819,74 @@ export function apply(ctx: Context, config: Config): void {
       card: 'generic',
       title: `Walkthrough: ${args.section}`,
       kind: 'other',
+      rawInput: args,
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'cross_asset',
+    description:
+      'Read one instrument through another — a ratio (HG=F/GC=F copper-in-gold, GC=F/SI=F gold-in-silver) '
+      + 'or a single instrument\'s own level. Returns the latest value, the change over the window, and where '
+      + 'that value sits in its OWN history (percentile), because a ratio has no meaning without its range. '
+      + 'Legs are joined on bar time, so mismatched calendars shrink the sample rather than shift it. '
+      + 'In this framework the cross-asset leg is a VETO, not a trigger: it can argue against a setup but '
+      + 'never starts one, and a stretched ratio can stay stretched.',
+    parameters: {
+      numerator: { type: 'string', required: true, description: 'The leg being priced, e.g. HG=F (copper).' },
+      denominator: { type: 'string', description: 'The leg doing the pricing, e.g. GC=F (gold). Omit to read the numerator alone.' },
+      timeframe: { type: 'string', required: true, description: 'Bar interval both legs are read on.', enum: [...TIMEFRAMES] },
+      bars: { type: 'integer', description: 'How many bars of history to compare over (default 250, max 2000).' },
+      scale: { type: 'number', description: 'Display multiplier for the ratio, printed with the value (e.g. 1000 turns copper-in-gold 0.0015 into 1.506). Default 1.' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          pair: { type: 'string', required: true },
+          mode: { type: 'string', required: true },
+          timeframe: { type: 'string', required: true },
+          bars: { type: 'integer', required: true },
+          droppedBars: { type: 'integer', required: true },
+          latest: { type: 'number', required: true },
+          changePct: { type: 'number', required: true },
+          percentile: { type: 'number', required: true },
+          thin: { type: 'boolean', required: true },
+          scale: { type: 'number', required: true },
+          text: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text as string }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const limit = Math.min(MAX_OHLCV_BARS, Math.max(2, args.bars ?? 250))
+      const timeframe = args.timeframe as Timeframe
+      const numeratorCandles = await provider.getOhlcv({ symbol: args.numerator, timeframe, limit })
+      if (numeratorCandles.length === 0) throw new Error(`no candles for ${args.numerator} @ ${timeframe}`)
+      const denominatorCandles = args.denominator === undefined
+        ? undefined
+        : await provider.getOhlcv({ symbol: args.denominator, timeframe, limit })
+      if (denominatorCandles !== undefined && denominatorCandles.length === 0) {
+        throw new Error(`no candles for ${args.denominator} @ ${timeframe}`)
+      }
+      const { points, dropped } = joinLegs(
+        { symbol: args.numerator, candles: numeratorCandles },
+        denominatorCandles === undefined ? undefined : { symbol: args.denominator!, candles: denominatorCandles },
+      )
+      const pair = args.denominator === undefined ? args.numerator : `${args.numerator}/${args.denominator}`
+      const scale = args.scale === undefined || args.scale <= 0 ? 1 : args.scale
+      const result = describeCrossAsset(points, pair, args.denominator === undefined ? 'level' : 'ratio', timeframe, scale)
+      const described = { ...result, droppedBars: dropped }
+      return { ...described, text: renderCrossAsset(described) }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Cross-asset: ${args.denominator === undefined ? args.numerator : `${args.numerator}/${args.denominator}`}`,
+      kind: 'read',
       rawInput: args,
     }),
   }))
