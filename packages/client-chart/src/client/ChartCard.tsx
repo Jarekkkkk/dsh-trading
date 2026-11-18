@@ -334,6 +334,22 @@ const CHIP_DEFS: ChipDef[] = [
   { id: 'mfi', indicator: { name: 'TM_MFI', figures: { mfi: 'mfi14' } }, label: ind => ({ text: `MFI ${fmt(get(ind['mfi14'], 'value'))}`, state: get(ind['mfi14'], 'state') }) },
   { id: 'bb', indicator: { name: 'TM_BB', figures: { upper: 'bb_upper', middle: 'bb_middle', lower: 'bb_lower' }, overlay: true }, label: ind => ({ text: 'BB(20,2)', state: get(ind['bollinger20'], 'state') }) },
   { id: 'ma', label: ind => ({ text: 'MA posture', state: get(ind['movingAverages'], 'closeVs') }) },
+  // The four-colour regime, appended so no existing chip moves. It carries no
+  // `indicator`, so it renders as a readout: the state has no natural numeric axis,
+  // and inventing one would put a made-up series on a chart that promises not to.
+  {
+    id: 'regime',
+    label: ind => {
+      const regime = ind['regime'] as { color?: unknown; baseline?: unknown; extreme?: unknown } | undefined
+      const color = typeof regime?.color === 'string' ? regime.color : null
+      const baseline = typeof regime?.baseline === 'string' ? regime.baseline : null
+      const extreme = typeof regime?.extreme === 'string' ? regime.extreme : null
+      return {
+        text: color === null ? `Regime silent${baseline === null ? '' : ` (${baseline})`}` : `Regime ${color}`,
+        state: color === null ? null : `${baseline} · ${extreme}`,
+      }
+    },
+  },
 ]
 
 /** Horizontal step between label lanes, in px. */

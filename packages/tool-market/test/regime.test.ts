@@ -341,6 +341,9 @@ describe("renderSnapshot", () => {
     expect(text).toContain(`RSI14 ${snapshot.rsi14.value} (overbought)`)
     expect(text).toContain("close above 20/50/200")
     expect(text).toContain("BB(20,2) inside bands")
-    expect(text.split("\n")).toHaveLength(4)
+    // The four-colour regime gets its own line: it is a different kind of claim
+    // (extreme x baseline) from the per-indicator rows above it.
+    expect(text).toContain("regime ")
+    expect(text.split("\n")).toHaveLength(5)
   })
 })

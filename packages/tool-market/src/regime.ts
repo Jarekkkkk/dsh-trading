@@ -14,6 +14,8 @@
 import type { Candle } from '@dsh-trading/market-data'
 import { rsi, sma } from './indicators.js'
 import { adx, atr, bollinger, ema, macd, mfi, stochastic } from './candle-indicators.js'
+import { regimeLabel, regimeReading } from './regime-color.js'
+import type { RegimeReading } from './regime-color.js'
 
 /** Latest defined value of a series, or null when nothing seeded. */
 function last(series: readonly (number | null)[]): number | null {
@@ -74,6 +76,11 @@ export type RegimeSnapshot = {
   macd: { line: number | null; signal: number | null; histogram: number | null; state: string | null }
   mfi14: { value: number | null; state: string | null }
   atr14: { value: number | null; pctOfClose: number | null }
+  /**
+   * The four-colour reading: Stochastic as an extreme alarm, split by ADX trend
+   * context. Null-safe and usually silent — see ./regime-color.ts.
+   */
+  regime: RegimeReading
   movingAverages: {
     sma20: number | null
     sma50: number | null
@@ -149,6 +156,9 @@ export function regimeSnapshot(candles: readonly Candle[]): RegimeSnapshot {
       value: atrV,
       pctOfClose: atrV === null || latest.close === 0 ? null : round((atrV / latest.close) * 100),
     },
+    // Classified from the same rounded values the snapshot reports, like every
+    // other label here: a chip and the number behind it cannot disagree.
+    regime: regimeReading(kV, adxV),
     movingAverages: {
       sma20: smas[0]![1],
       sma50: smas[1]![1],
@@ -174,6 +184,7 @@ export function renderSnapshot(timeframe: string, s: RegimeSnapshot): string {
     `[${timeframe}] ${s.bars} bars, last ${s.lastTime}, close ${s.close}${s.changePct !== null ? ` (${s.changePct > 0 ? '+' : ''}${s.changePct}%)` : ''}`,
     `  RSI14 ${fmt(s.rsi14.value)} (${s.rsi14.state ?? '–'}) | Stoch %K ${fmt(s.stochastic.k)} %D ${fmt(s.stochastic.d)} (${s.stochastic.state ?? '–'}) | ADX ${fmt(s.adx14.value)} +DI ${fmt(s.adx14.plusDi)} −DI ${fmt(s.adx14.minusDi)} (${s.adx14.state ?? '–'})`,
     `  MACD ${fmt(s.macd.line)} sig ${fmt(s.macd.signal)} hist ${fmt(s.macd.histogram)} (${s.macd.state ?? '–'}) | MFI ${fmt(s.mfi14.value)} (${s.mfi14.state ?? '–'}) | ATR ${fmt(s.atr14.value)}${s.atr14.pctOfClose !== null ? ` = ${s.atr14.pctOfClose}% of close` : ''}`,
+    `  regime ${regimeLabel(s.regime)} — ${s.regime.meaning}`,
     `  close ${s.movingAverages.closeVs} | SMA20 ${fmt(s.movingAverages.sma20)} SMA50 ${fmt(s.movingAverages.sma50)} SMA200 ${fmt(s.movingAverages.sma200)} EMA20 ${fmt(s.movingAverages.ema20)} | BB(20,2) ${s.bollinger20.state ?? '–'} [${fmt(s.bollinger20.lower)} … ${fmt(s.bollinger20.upper)}]`,
   ].join('\n')
 }
