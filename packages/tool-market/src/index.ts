@@ -17,6 +17,7 @@ import { rsi, sma } from './indicators.js'
 import { regimeSnapshot, renderSnapshot } from './regime.js'
 import { describeCrossAsset, joinLegs, renderCrossAsset } from './cross-asset.js'
 import { renderStructure, structureReport } from './structure.js'
+import { renderSetup, reviewSetup } from './setup.js'
 import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
 import { chartCandles, chartSeries, regimeSeries, roundSeries } from './chart-payload.js'
@@ -30,6 +31,8 @@ export { regimeSnapshot, renderSnapshot } from './regime.js'
 export { regimeLabel, regimeReading, REGIME_DEFAULTS } from './regime-color.js'
 export { describeCrossAsset, joinLegs, renderCrossAsset, MIN_BARS_FOR_PERCENTILE } from './cross-asset.js'
 export { findFailedBreak, findSwings, nearestLevels, renderStructure, structureReport, windowOf, DEFAULT_WINDOWS } from './structure.js'
+export { alignmentGate, renderSetup, reviewSetup, ENTRY_NEAR_LEVEL_ATR, MIN_RR } from './setup.js'
+export type { CrossAssetVeto, Gate, GateStatus, Proposal, SetupReview, SetupVerdict } from './setup.js'
 export type { FailedBreak, StructureLevel, StructureReport, Swing, Window } from './structure.js'
 export type { CrossAssetResult, Leg, RatioPoint } from './cross-asset.js'
 export type { RegimeBaseline, RegimeColor, RegimeExtreme, RegimeOptions, RegimeReading } from './regime-color.js'
@@ -897,6 +900,75 @@ export function apply(ctx: Context, config: Config): void {
       card: 'generic',
       title: `Cross-asset: ${args.denominator === undefined ? args.numerator : `${args.numerator}/${args.denominator}`}`,
       kind: 'read',
+      rawInput: args,
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'judge_setup',
+    description:
+      'Adjudicate a trade you have proposed — it never invents one. Supply direction, entry, invalidation and at '
+      + 'least one target, and it gates them the way the framework does: Entry/Stop/Target must arrive together, '
+      + 'timeframe alignment may only forbid, the regime decides whether an extreme means continuation or '
+      + 'mean-reversion, the entry must sit at confirmed structure rather than adrift, and reward:risk must clear '
+      + '1:1 at the first target. Cross-asset can veto only under a threshold YOU supply. What the framework has '
+      + 'and this tool cannot evaluate (打點, 選美, Ariston Channel, 主力 flow) is reported as UNKNOWN, never as a '
+      + 'pass, and a substantive UNKNOWN forces STAND ASIDE. Targets are yours: his T1/T2/T3 derivation is '
+      + 'unpublished and this tool will not fake it.',
+    parameters: {
+      symbol: { type: 'string', required: true, description: 'Instrument symbol exactly as list_symbols reports it.' },
+      timeframe: { type: 'string', required: true, description: 'Bar interval the proposal is judged on.', enum: [...TIMEFRAMES] },
+      direction: { type: 'string', required: true, description: 'Proposed side.', enum: ['long', 'short'] },
+      entry: { type: 'number', required: true, description: 'Proposed entry price.' },
+      invalidation: { type: 'number', required: true, description: 'The price that would prove the read wrong (a price, never a percentage).' },
+      targets: { type: 'array', required: true, description: 'One to three target prices, T1 first.', items: { type: 'number' } },
+      higherTimeframe: { type: 'string', description: 'Second timeframe for the alignment gate (e.g. 1w when judging 1d). Omit to skip that gate.' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          symbol: { type: 'string', required: true },
+          timeframe: { type: 'string', required: true },
+          verdict: { type: 'string', required: true },
+          reason: { type: 'string', required: true },
+          atr: { type: 'json', required: true },
+          riskReward: { type: 'json', required: true },
+          gates: { type: 'json', required: true },
+          text: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text as string }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const timeframe = args.timeframe as Timeframe
+      const candles = await provider.getOhlcv({ symbol: args.symbol, timeframe, limit: 300 })
+      if (candles.length === 0) throw new Error(`no candles for ${args.symbol} @ ${timeframe}`)
+      const higher = args.higherTimeframe === undefined
+        ? undefined
+        : await provider.getOhlcv({ symbol: args.symbol, timeframe: args.higherTimeframe as Timeframe, limit: 300 })
+      const review = reviewSetup({
+        symbol: args.symbol,
+        timeframe,
+        candles,
+        higherTimeframe: higher,
+        proposal: {
+          direction: args.direction as 'long' | 'short',
+          entry: args.entry,
+          invalidation: args.invalidation,
+          targets: (args.targets as number[]) ?? [],
+        },
+      })
+      return { ...review, text: renderSetup(review) }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Judge setup: ${args.symbol} ${args.direction}`,
+      kind: 'other',
       rawInput: args,
     }),
   }))

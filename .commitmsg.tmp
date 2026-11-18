@@ -1,0 +1,28 @@
+feat(tool-market): judge_setup — adjudicate a proposal, never invent one
+
+The judgment layer was the missing piece: three perceptual layers existed but
+nothing assembled them into his AND-gate.
+
+The contract is inverted on purpose. His T1/T2/T3 derivation is closed-source and
+the corpus reconstruction doc rates 'derive T1/T2 from ATR' a HIGH-severity error,
+so this tool does not compute targets: the caller proposes entry, stop and targets
+and the tool adjudicates — the same posture as audit_backtest.
+
+Gates, each with the rule it enforces:
+
+- three-piece: entry, stop and target must arrive together; a missing leg is a
+  veto, not a soft score.
+- alignment: two timeframes must agree on trend direction; the gate may only
+  forbid, never pick a side.
+- direction: the regime decides what an extreme means, so fading an oversold in a
+  trend baseline is vetoed (green = continuation, not reversal).
+- structure: the entry must sit within 1 ATR of a confirmed fractal level or it is
+  adrift; a fresh extreme has no level by construction and says so.
+- risk-reward: rr per target, T1 must clear 1:1, stop on the right side.
+- cross-asset: veto only, and only under a caller-supplied threshold — a stretched
+  ratio can stay stretched, so no rule is assumed.
+- unavailable: momentum countdown, cross-instrument ranking, his channel and fund
+  flow are reported UNKNOWN and never silently passed; a substantive unknown
+  forces STAND ASIDE.
+
+33 test files, 543 tests.
