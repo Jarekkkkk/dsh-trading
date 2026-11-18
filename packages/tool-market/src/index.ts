@@ -853,6 +853,13 @@ export function apply(ctx: Context, config: Config): void {
           timeframe: { type: 'string', required: true },
           bars: { type: 'integer', required: true },
           droppedBars: { type: 'integer', required: true },
+          // from/to/first/min/max are part of the result: a percentile without the
+          // window it was measured over is the kind of number this project refuses.
+          from: { type: 'string', required: true },
+          to: { type: 'string', required: true },
+          first: { type: 'number', required: true },
+          min: { type: 'number', required: true },
+          max: { type: 'number', required: true },
           latest: { type: 'number', required: true },
           changePct: { type: 'number', required: true },
           percentile: { type: 'number', required: true },
