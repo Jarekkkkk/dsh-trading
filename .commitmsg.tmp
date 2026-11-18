@@ -1,28 +1,25 @@
-feat(tool-market): judge_setup — adjudicate a proposal, never invent one
+feat(tool-market): audit_energy_decay — test his one quantified claim
 
-The judgment layer was the missing piece: three perceptual layers existed but
-nothing assembled them into his AND-gate.
+'breaks release their strongest energy within 5-10 bars, rarely beyond' is the
+only part of the method stated numerically, so it is the only part we can falsify.
+The tool finds confirmed fractal swings, takes the first bar that CLOSES beyond
+one, measures where the favourable excursion peaks over a fixed horizon, and
+reports the distribution with its blind spots.
 
-The contract is inverted on purpose. His T1/T2/T3 derivation is closed-source and
-the corpus reconstruction doc rates 'derive T1/T2 from ATR' a HIGH-severity error,
-so this tool does not compute targets: the caller proposes entry, stop and targets
-and the tool adjudicates — the same posture as audit_backtest.
+On 10 years of daily data the claim does not survive, on four commodities:
 
-Gates, each with the rule it enforces:
+  GC=F  379 breaks: 21.4% peak inside bars 5-10, 44.6% after bar 10, median 9
+  SI=F  437 breaks: 18.3% inside 5-10, 42.3% after 10, median 8
+  CL=F  438 breaks: 20.5% inside 5-10, 44.7% after 10, median 9
+  HG=F  447 breaks: 17.0% inside 5-10, 45.6% after 10, median 9
 
-- three-piece: entry, stop and target must arrive together; a missing leg is a
-  veto, not a soft score.
-- alignment: two timeframes must agree on trend direction; the gate may only
-  forbid, never pick a side.
-- direction: the regime decides what an extreme means, so fading an oversold in a
-  trend baseline is vetoed (green = continuation, not reversal).
-- structure: the entry must sit within 1 ATR of a confirmed fractal level or it is
-  adrift; a fresh extreme has no level by construction and says so.
-- risk-reward: rr per target, T1 must clear 1:1, stop on the right side.
-- cross-asset: veto only, and only under a caller-supplied threshold — a stretched
-  ratio can stay stretched, so no rule is assumed.
-- unavailable: momentum countdown, cross-instrument ranking, his channel and fund
-  flow are reported UNKNOWN and never silently passed; a substantive unknown
-  forces STAND ASIDE.
+So the narrow window is wrong in both directions, while the loose shape (median
+peak around bar 9, i.e. energy concentrates early) survives. Reporting that split
+is the point of the tool: it is evidence, not agreement.
 
-33 test files, 543 tests.
+The verdict rule had to change once real data arrived: a sample that contradicts
+both halves of a claim is NOT_SUPPORTED, not NOT_PROVEN — absence of evidence and
+evidence against are different answers.
+
+Tri-state, deterministic, and it still refuses to conclude under 30 events.
+34 test files, 548 tests.

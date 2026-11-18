@@ -18,6 +18,7 @@ import { regimeSnapshot, renderSnapshot } from './regime.js'
 import { describeCrossAsset, joinLegs, renderCrossAsset } from './cross-asset.js'
 import { renderStructure, structureReport } from './structure.js'
 import { renderSetup, reviewSetup } from './setup.js'
+import { DEFAULT_HORIZON, energyDecay, renderEnergyDecay } from './energy-decay.js'
 import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
 import { chartCandles, chartSeries, regimeSeries, roundSeries } from './chart-payload.js'
@@ -32,6 +33,8 @@ export { regimeLabel, regimeReading, REGIME_DEFAULTS } from './regime-color.js'
 export { describeCrossAsset, joinLegs, renderCrossAsset, MIN_BARS_FOR_PERCENTILE } from './cross-asset.js'
 export { findFailedBreak, findSwings, nearestLevels, renderStructure, structureReport, windowOf, DEFAULT_WINDOWS } from './structure.js'
 export { alignmentGate, renderSetup, reviewSetup, ENTRY_NEAR_LEVEL_ATR, MIN_RR } from './setup.js'
+export { energyDecay, renderEnergyDecay, DEFAULT_HORIZON, MIN_EVENTS } from './energy-decay.js'
+export type { DecayEvent, DecayVerdict, EnergyDecayResult } from './energy-decay.js'
 export type { CrossAssetVeto, Gate, GateStatus, Proposal, SetupReview, SetupVerdict } from './setup.js'
 export type { FailedBreak, StructureLevel, StructureReport, Swing, Window } from './structure.js'
 export type { CrossAssetResult, Leg, RatioPoint } from './cross-asset.js'
@@ -899,6 +902,63 @@ export function apply(ctx: Context, config: Config): void {
     presentCall: args => ({
       card: 'generic',
       title: `Cross-asset: ${args.denominator === undefined ? args.numerator : `${args.numerator}/${args.denominator}`}`,
+      kind: 'read',
+      rawInput: args,
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'audit_energy_decay',
+    description:
+      'Test his one quantified claim instead of repeating it: after a break, price releases its strongest energy '
+      + 'within 5-10 bars and rarely beyond. Finds confirmed fractal swings, takes the first bar that CLOSES '
+      + 'beyond one, measures where the favourable excursion peaks over a fixed horizon, and reports the '
+      + 'distribution. Tri-state and allowed to be NOT_PROVEN: under 30 events the sample cannot support a '
+      + 'conclusion. Deterministic — no LLM grades anything. Tests where the move peaked, NOT whether a target '
+      + 'would have filled first; the blind spots print with every result.',
+    parameters: {
+      symbol: { type: 'string', required: true, description: 'Instrument symbol exactly as list_symbols reports it.' },
+      timeframe: { type: 'string', required: true, description: 'Bar interval to test on.', enum: [...TIMEFRAMES] },
+      bars: { type: 'integer', description: 'Bars of history to scan (default 500, max 2000).' },
+      horizon: { type: 'integer', description: 'Forward bars to measure the excursion peak (default 20).' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          symbol: { type: 'string', required: true },
+          timeframe: { type: 'string', required: true },
+          bars: { type: 'integer', required: true },
+          horizon: { type: 'integer', required: true },
+          events: { type: 'integer', required: true },
+          medianPeakBar: { type: 'number', required: true },
+          meanPeakBar: { type: 'number', required: true },
+          shareWithin5to10: { type: 'number', required: true },
+          shareBeyond10: { type: 'number', required: true },
+          shareBefore5: { type: 'number', required: true },
+          medianPeakAtr: { type: 'number', required: true },
+          verdict: { type: 'string', required: true },
+          headline: { type: 'string', required: true },
+          blindSpots: { type: 'json', required: true },
+          text: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text as string }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const limit = Math.min(MAX_OHLCV_BARS, Math.max(60, args.bars ?? 500))
+      const candles = await provider.getOhlcv({ symbol: args.symbol, timeframe: args.timeframe as Timeframe, limit })
+      if (candles.length === 0) throw new Error(`no candles for ${args.symbol} @ ${args.timeframe}`)
+      const result = energyDecay(args.symbol, args.timeframe, candles, args.horizon ?? DEFAULT_HORIZON)
+      return { ...result, text: renderEnergyDecay(result) }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Energy decay: ${args.symbol} ${args.timeframe}`,
       kind: 'read',
       rawInput: args,
     }),
