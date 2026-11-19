@@ -1,20 +1,24 @@
-fix(tool-market): the alignment gate names which timeframe is untrended
+feat(tool-market): contract identity for continuous futures
 
-For NET (2026-11-19, fast ADX 18.2, slow 30.4) judge_setup printed:
+Two failures happened in one day because a continuous series has no identity:
 
-  'higher timeframe is not trending (slow 30.4 < 20, fast 18.2)'
+  1. CL=F rolled from CLZ26 to CLF27 on 2026-11-19 and the provider's label still
+     said 'Crude Oil Dec 26'. A daily bar minted on December was quoted as support
+     against a January price about 0.95 USD away — the distance was silently wrong.
+  2. The splice hid the day's move: both contracts rose ~1.22%, the continuous
+     series printed +0.07%, and an intraday read showed the SIGN flipped (-0.54%
+     while January was +0.61%).
 
-30.4 is not below 20. The untrended leg was the DAILY; the weekly was trending
-harder than either gate threshold. The branch only had two cases — 'neither' and
-'slow < 20' — so any fast-untrended/slow-trended pair fell through into a sentence
-that contradicted its own numbers.
+resolve_contract answers the question the label cannot: it prices the candidate
+months, matches the continuous close against them within 0.25% (adjacent months
+differ by ~1%, so this is identity, not similarity), scans 40 bars for the last day
+the match changed, and reports the roll date plus the current spread.
 
-That is worse than a wrong number: it is a confident false statement about the
-data, and a reader who only reads the verdict line is told to look at the wrong
-chart. Now three-way, with the fast/slow values stated so the claim can be checked
-against them.
+contract.ts is pure and clock-injected: month-code generation across a year
+boundary, symbol construction per venue, matching, and lastRoll which deliberately
+ignores unmatched days so a missing quote cannot masquerade as a roll.
 
-Two tests: one pins that a flat fast leg reports 'lower timeframe is not trending'
-and never the 'higher' wording; one keeps the genuine slow-untrended case honest.
+The rule the tool now states: continuous series for direction and shape, price
+levels from the ACTIVE named contract.
 
-35 test files, 561 tests.
+36 test files, 572 tests.

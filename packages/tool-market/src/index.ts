@@ -19,6 +19,7 @@ import { describeCrossAsset, joinLegs, renderCrossAsset } from './cross-asset.js
 import { renderStructure, structureReport } from './structure.js'
 import { renderSetup, reviewSetup } from './setup.js'
 import { DEFAULT_HORIZON, energyDecay, renderEnergyDecay } from './energy-decay.js'
+import { candidateMonths, continuousRoot, contractSymbol, exchangesFor, isContinuous, matchContract, monthLabel, lastRoll } from './contract.js'
 import { chartHtml, renderChartSvg } from './chart.js'
 import type { ChartLevel, ChartOverlay } from './chart.js'
 import { chartCandles, chartSeries, regimeSeries, roundSeries } from './chart-payload.js'
@@ -34,6 +35,8 @@ export { describeCrossAsset, joinLegs, renderCrossAsset, MIN_BARS_FOR_PERCENTILE
 export { findFailedBreak, findSwings, nearestLevels, renderStructure, structureReport, windowOf, DEFAULT_WINDOWS } from './structure.js'
 export { alignmentGate, renderSetup, reviewSetup, ENTRY_NEAR_LEVEL_ATR, MIN_RR } from './setup.js'
 export { energyDecay, renderEnergyDecay, DEFAULT_HORIZON, MIN_EVENTS } from './energy-decay.js'
+export { candidateMonths, continuousRoot, contractSymbol, exchangesFor, isContinuous, lastRoll, matchContract, monthLabel, MONTH_CODES } from './contract.js'
+export type { CandidateMonth, ContractMatch } from './contract.js'
 export type { DecayEvent, DecayVerdict, EnergyDecayResult } from './energy-decay.js'
 export type { CrossAssetVeto, Gate, GateStatus, Proposal, SetupReview, SetupVerdict } from './setup.js'
 export type { FailedBreak, StructureLevel, StructureReport, Swing, Window } from './structure.js'
@@ -902,6 +905,122 @@ export function apply(ctx: Context, config: Config): void {
     presentCall: args => ({
       card: 'generic',
       title: `Cross-asset: ${args.denominator === undefined ? args.numerator : `${args.numerator}/${args.denominator}`}`,
+      kind: 'read',
+      rawInput: args,
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'resolve_contract',
+    description:
+      'Which named futures contract is a continuous series like CL=F actually quoting right now, and when did it '
+      + 'last roll? A continuous series is a splice of front months: price levels stop being comparable across a '
+      + 'roll, and a roll gap looks like a move that never happened (on 2026-11-19 CL=F showed +0.07% while both '
+      + 'its Dec and Jan contracts rose ~1.22%). The provider label is not trustworthy either — it still said '
+      + '"Crude Oil Dec 26" while the series tracked January — so this tool identifies the contract by matching '
+      + 'prices against the named months, scans the recent history for the switch date, and reports the roll gap. '
+      + 'Run it before quoting any price level from a =F symbol.',
+    parameters: {
+      symbol: { type: 'string', required: true, description: 'Continuous futures symbol, e.g. CL=F or GC=F.' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          symbol: { type: 'string', required: true },
+          root: { type: 'string', required: true },
+          active: { type: 'json', required: true },
+          rolledOn: { type: 'json', required: true },
+          candidates: { type: 'json', required: true },
+          text: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text as string }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const symbol = args.symbol
+      const root = continuousRoot(symbol)
+      if (root === null) {
+        throw new Error(`${symbol} is not a continuous symbol (expected the XXX=F form); a named contract already identifies itself`)
+      }
+      const continuous = await provider.getOhlcv({ symbol, timeframe: '1d', limit: 40 })
+      if (continuous.length === 0) throw new Error(`no candles for ${symbol}`)
+
+      // Try each venue until one answers with usable history.
+      const months = candidateMonths(new Date(), 4)
+      const tried: { symbol: string; candles: Awaited<ReturnType<typeof provider.getOhlcv>> }[] = []
+      for (const exchange of exchangesFor(root)) {
+        for (const month of months) {
+          const named = contractSymbol(root, month, exchange)
+          try {
+            const candles = await provider.getOhlcv({ symbol: named, timeframe: '1d', limit: 40 })
+            if (candles.length > 0) tried.push({ symbol: named, candles })
+          } catch {
+            // A venue that does not list this root simply contributes nothing.
+          }
+        }
+        if (tried.length >= 2) break
+      }
+      if (tried.length === 0) throw new Error(`no named contracts resolved for ${root} on any known venue`)
+
+      const byTime = tried.map(t => ({ symbol: t.symbol, closes: new Map(t.candles.map(c => [c.time, c.close])) }))
+      const matches: (string | null)[] = []
+      const times: string[] = []
+      for (const bar of continuous) {
+        const named = byTime.map(t => ({ symbol: t.symbol, close: t.closes.get(bar.time) ?? NaN }))
+          .filter(n => Number.isFinite(n.close))
+        const hit = matchContract(bar.close, named)
+        matches.push(hit === null ? null : hit.symbol)
+        times.push(bar.time)
+      }
+      const lastBar = continuous[continuous.length - 1]!
+      const activeNamed = byTime.map(t => ({ symbol: t.symbol, close: t.closes.get(lastBar.time) ?? NaN }))
+        .filter(n => Number.isFinite(n.close))
+      const active = matchContract(lastBar.close, activeNamed)
+      const roll = lastRoll(matches, times)
+
+      const candidates = activeNamed.map(n => ({
+        symbol: n.symbol,
+        close: n.close,
+        diffPct: active !== null && n.symbol === active.symbol
+          ? active.diffPct
+          : Number((((n.close - lastBar.close) / lastBar.close) * 100).toFixed(3)),
+      }))
+      const gap = active === null || candidates.length < 2
+        ? null
+        : (() => {
+            const other = candidates.filter(c => c.symbol !== active.symbol)[0]
+            return other === undefined ? null : Number((active.close - other.close).toFixed(3))
+          })()
+      const lines = [
+        `${symbol} (${root}) last close ${lastBar.close} at ${lastBar.time.slice(0, 10)}`,
+        active === null
+          ? 'active contract: UNRESOLVED — no named month matched within 0.25%; treat every price level on this series as unverified'
+          : `active contract: ${active.symbol} (diff ${active.diffPct}%)`,
+        roll === null
+          ? 'roll in the window: none — the tracked contract did not change in the last 40 bars'
+          : `LAST ROLL: ${roll.date} ${roll.from} -> ${roll.to}. Bars before that date belong to ${roll.from}, so levels minted there are NOT comparable with prices after it`,
+        gap === null ? 'roll gap: unknown (needs two candidates)' : `current spread vs the neighbouring month: ${gap} (about ${((Math.abs(gap) / lastBar.close) * 100).toFixed(2)}% of price)`,
+        ...candidates.map(c => `  ${c.symbol.padEnd(12)} ${c.close} (${c.diffPct > 0 ? '+' : ''}${c.diffPct}% vs continuous)`),
+        `candidate months tested: ${months.map(m => monthLabel(m)).join(', ')}`,
+        'rule: use the continuous series for direction and shape; quote price levels from the ACTIVE contract.',
+      ]
+      return {
+        symbol,
+        root,
+        active,
+        rolledOn: roll,
+        candidates,
+        text: lines.join('\n'),
+      }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Contract: ${args.symbol}`,
       kind: 'read',
       rawInput: args,
     }),
