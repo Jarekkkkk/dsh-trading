@@ -18,6 +18,7 @@ import { regimeSnapshot, renderSnapshot } from './regime.js'
 import { describeCrossAsset, joinLegs, renderCrossAsset } from './cross-asset.js'
 import { renderStructure, structureReport } from './structure.js'
 import { renderSetup, reviewSetup } from './setup.js'
+import { DEFAULT_CHANNEL_BARS, channelOf, renderChannel } from './channel.js'
 import { DEFAULT_HORIZON, energyDecay, renderEnergyDecay } from './energy-decay.js'
 import { candidateMonths, continuousRoot, contractSymbol, exchangesFor, isContinuous, matchContract, monthLabel, lastRoll } from './contract.js'
 import { chartHtml, renderChartSvg } from './chart.js'
@@ -34,6 +35,8 @@ export { regimeLabel, regimeReading, REGIME_DEFAULTS } from './regime-color.js'
 export { describeCrossAsset, joinLegs, renderCrossAsset, MIN_BARS_FOR_PERCENTILE } from './cross-asset.js'
 export { findFailedBreak, findSwings, nearestLevels, renderStructure, structureReport, windowOf, DEFAULT_WINDOWS } from './structure.js'
 export { alignmentGate, renderSetup, reviewSetup, ENTRY_NEAR_LEVEL_ATR, MIN_RR } from './setup.js'
+export { channelOf, renderChannel, DEFAULT_CHANNEL_BARS, MIN_R2, RAIL_SIGMA } from './channel.js'
+export type { Channel, ChannelBreak } from './channel.js'
 export { energyDecay, renderEnergyDecay, DEFAULT_HORIZON, MIN_EVENTS } from './energy-decay.js'
 export { candidateMonths, continuousRoot, contractSymbol, exchangesFor, isContinuous, lastRoll, matchContract, monthLabel, MONTH_CODES } from './contract.js'
 export type { CandidateMonth, ContractMatch } from './contract.js'
@@ -1078,6 +1081,79 @@ export function apply(ctx: Context, config: Config): void {
     presentCall: args => ({
       card: 'generic',
       title: `Energy decay: ${args.symbol} ${args.timeframe}`,
+      kind: 'read',
+      rawInput: args,
+    }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'market_channel',
+    description:
+      'Fit a price channel rather than asking anyone to draw one. The midline is a least-squares regression of close '
+      + 'on bar index and the rails sit at two standard deviations of the residuals, so every bar votes and the rails '
+      + 'move with the fit instead of being anchored to two hand-picked pivots. Reports R-squared (a channel is a '
+      + 'claim that price travels in a direction, and R-squared measures that claim), the close\'s position between '
+      + 'the rails (0% lower, 100% upper), slope in price and percent per bar, width as a percent of close, how many '
+      + 'swings sit near each rail, width versus the preceding window of the same length (sigma bands can breathe, so '
+      + 'a narrowing channel is a comparison), and recent closes outside a rail with whether they came back. Returns '
+      + 'status insufficient when R-squared is under 0.3: a range is not a channel.',
+    parameters: {
+      symbol: { type: 'string', required: true, description: 'Instrument symbol exactly as list_symbols reports it.' },
+      timeframe: { type: 'string', required: true, description: 'Bar interval to fit on.', enum: [...TIMEFRAMES] },
+      bars: { type: 'integer', description: 'Window to fit (default 120, max 2000).' },
+      provider: { type: 'string', description: 'Provider id. Omit to use the default provider.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          symbol: { type: 'string', required: true },
+          timeframe: { type: 'string', required: true },
+          close: { type: 'number', required: true },
+          status: { type: 'string', required: true },
+          r2: { type: 'number', required: true },
+          slopePerBar: { type: 'number', required: true },
+          slopePctPerBar: { type: 'number', required: true },
+          upper: { type: 'number', required: true },
+          lower: { type: 'number', required: true },
+          widthPct: { type: 'number', required: true },
+          positionPct: { type: 'number', required: true },
+          narrowing: { type: 'json', required: true },
+          breaks: { type: 'json', required: true },
+          text: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.text as string }],
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, _exec) {
+      const provider = ctx.marketData.provider(args.provider)
+      const limit = Math.min(MAX_OHLCV_BARS, Math.max(30, args.bars ?? DEFAULT_CHANNEL_BARS))
+      const candles = await provider.getOhlcv({ symbol: args.symbol, timeframe: args.timeframe as Timeframe, limit })
+      if (candles.length === 0) throw new Error(`no candles for ${args.symbol} @ ${args.timeframe}`)
+      const close = candles[candles.length - 1]!.close
+      const channel = channelOf(candles, { bars: limit })
+      return {
+        symbol: args.symbol,
+        timeframe: args.timeframe,
+        close,
+        status: channel.status,
+        r2: channel.r2,
+        slopePerBar: channel.slopePerBar,
+        slopePctPerBar: channel.slopePctPerBar,
+        upper: channel.upper,
+        lower: channel.lower,
+        widthPct: channel.widthPct,
+        positionPct: channel.positionPct,
+        narrowing: channel.narrowing,
+        breaks: channel.breaks,
+        text: `${args.symbol} @ ${args.timeframe}\n${renderChannel(channel, close)}`,
+      }
+    },
+    presentCall: args => ({
+      card: 'generic',
+      title: `Channel: ${args.symbol} ${args.timeframe}`,
       kind: 'read',
       rawInput: args,
     }),

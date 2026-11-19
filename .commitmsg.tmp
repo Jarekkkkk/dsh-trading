@@ -1,24 +1,28 @@
-feat(tool-market): contract identity for continuous futures
+feat(tool-market): market_channel — a channel that can fail
 
-Two failures happened in one day because a continuous series has no identity:
+The workflow needs a channel; the structure layer only had a range plus a slope,
+which is a proxy, not a channel.
 
-  1. CL=F rolled from CLZ26 to CLF27 on 2026-11-19 and the provider's label still
-     said 'Crude Oil Dec 26'. A daily bar minted on December was quoted as support
-     against a January price about 0.95 USD away — the distance was silently wrong.
-  2. The splice hid the day's move: both contracts rose ~1.22%, the continuous
-     series printed +0.07%, and an intraday read showed the SIGN flipped (-0.54%
-     while January was +0.61%).
+Two designs were tried and rejected before this one, both worth recording:
 
-resolve_contract answers the question the label cannot: it prices the candidate
-months, matches the continuous close against them within 0.25% (adjacent months
-differ by ~1%, so this is identity, not similarity), scans 40 bars for the last day
-the match changed, and reports the roll date plus the current spread.
+  1. Rails at the extreme residuals of the swing points. Parallel by construction,
+     but anchored to old pivots: after copper's break it printed 'position -78%',
+     and gold's rails sat 7 ATR from their own swings.
+  2. Gating that fit on touch ratio plus worst deviation. The deviation metric
+     measures channel THICKNESS in ATR, not fit quality, so every instrument was
+     refused: copper, oil, gold and QQQ all came back 'no channel'.
 
-contract.ts is pure and clock-injected: month-code generation across a year
-boundary, symbol construction per venue, matching, and lastRoll which deliberately
-ignores unmatched days so a missing quote cannot masquerade as a roll.
+What ships is a linear regression channel: regress close on bar index, rails at
+two sigma of the residuals. Every bar votes, the rails move with the fit, and
+R-squared decides whether a channel exists at all — under 0.3 the tool says 'this
+is a range, not a channel' instead of drawing two confident lines.
 
-The rule the tool now states: continuous series for direction and shape, price
-levels from the ACTIVE named contract.
+Live check, 60 bars: copper R2 0.40 with the close below the lower rail and two
+held breaks; gold R2 0.89 with three failed upper-rail breaks before the downside
+break; oil R2 0.16 and QQQ R2 0.06 both correctly refused as ranges.
 
-36 test files, 572 tests.
+index.ts was restored from HEAD mid-work: a read with the default 2000-line limit
+was written back and truncated the file at 971 lines. The tool was then re-added
+surgically instead of by whole-file rewrite.
+
+37 test files, 580 tests.
