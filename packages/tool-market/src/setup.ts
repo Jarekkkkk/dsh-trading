@@ -116,13 +116,15 @@ export function alignmentGate(fast: readonly Candle[], slow: readonly Candle[]):
     // holding period the caller intends, and the tool cannot know that — so it
     // reports the rule rather than picking a verdict on the caller's behalf.
     const both = f.adx < 20 && s.adx < 20
-    return {
-      id: 'alignment',
-      status: 'unknown',
-      detail: both
-        ? `neither timeframe trends (fast ${f.adx.toFixed(1)}, slow ${s.adx.toFixed(1)}, need both >= 20) — his step 1: do not trade`
-        : `higher timeframe is not trending (slow ${s.adx.toFixed(1)} < 20, fast ${f.adx.toFixed(1)}) — his step 1 permits short-term only, no held trend position; the tool cannot know your intended horizon`,
-    }
+    // Which side is untrended IS the message: a reader told the wrong one looks at the
+    // wrong chart. NET (2026-11-19) has fast 18.2 and slow 30.4, and the old text
+    // claimed 'slow 30.4 < 20' — a sentence that is not about this data at all.
+    const detail = both
+      ? `neither timeframe trends (fast ${f.adx.toFixed(1)}, slow ${s.adx.toFixed(1)}, need both >= 20) — his step 1: do not trade`
+      : s.adx < 20
+        ? `higher timeframe is not trending (slow ${s.adx.toFixed(1)} < 20, fast ${f.adx.toFixed(1)}) — his step 1 permits short-term only, no held trend position`
+        : `lower timeframe is not trending (fast ${f.adx.toFixed(1)} < 20) while the higher one is (slow ${s.adx.toFixed(1)}) — his step 1 wants both, so there is no trend entry here; a lower-timeframe trade is your call, not this gate's`
+    return { id: 'alignment', status: 'unknown', detail }
   }
   if (f.up !== s.up) {
     return {

@@ -1,25 +1,20 @@
-fix(tool-market): a trend has a side, and the judge must check it
+fix(tool-market): the alignment gate names which timeframe is untrended
 
-Back-testing our own judge_setup against his published posts (163, 2026-11-13)
-exposed a hole: it approved a LONG at the top of an oversold bounce in gold while
--DI 30.4 dominated +DI 15.4 at ADX 25.5. It passed because the only direction check
-was the four-colour regime gate, which fires ONLY when stochastic sits inside an
-extreme band — that day Stoch was 20.96, one point above it.
+For NET (2026-11-19, fast ADX 18.2, slow 30.4) judge_setup printed:
 
-So the gate silently depended on an oscillator threshold sitting in the right place.
-Rereading the two later posts (11-16, 11-17) the same proposal was vetoed, purely
-because Stoch had fallen to 8.3 — the tool's verdict was decided by an accident of
-where the oscillator rested, not by the trend.
+  'higher timeframe is not trending (slow 30.4 < 20, fast 18.2)'
 
-New gate 'trend-side': when ADX >= 20 a trend exists, and +DI/-DI name its side, so
-a proposal against the dominant DI is vetoed outright. Below ADX 20 there is no side
-to be against and the gate stands aside, leaving range trades to the regime gate.
+30.4 is not below 20. The untrended leg was the DAILY; the weekly was trending
+harder than either gate threshold. The branch only had two cases — 'neither' and
+'slow < 20' — so any fast-untrended/slow-trended pair fell through into a sentence
+that contradicted its own numbers.
 
-Regression: gold 2026-11-13 long @4136 now returns STAND ASIDE (was ACT), matching
-his own call that day ('not an uptrend yet, at most an oversold bounce'). All three
-article dates now agree with him.
+That is worse than a wrong number: it is a confident false statement about the
+data, and a reader who only reads the verdict line is told to look at the wrong
+chart. Now three-way, with the fast/slow values stated so the claim can be checked
+against them.
 
-Also adds the test the suite was missing: proof that the tool can return ACT at all.
-Without it, a judge that only ever refuses looks rigorous while being broken.
+Two tests: one pins that a flat fast leg reports 'lower timeframe is not trending'
+and never the 'higher' wording; one keeps the genuine slow-untrended case honest.
 
-35 test files, 559 tests.
+35 test files, 561 tests.

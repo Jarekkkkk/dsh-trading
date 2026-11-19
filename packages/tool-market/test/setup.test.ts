@@ -190,3 +190,26 @@ describe('the tool can actually say act', () => {
     expect(r.verdict).toBe('act')
   })
 })
+
+describe('alignment message names the right timeframe', () => {
+  /** Choppy: no directional persistence, so ADX stays low. */
+  function choppy(n = 80): Candle[] {
+    return Array.from({ length: n }, (_, i) => {
+      const close = 100 + (i % 2 === 0 ? 0.6 : -0.6)
+      return { time: day(i), open: close, high: close + 0.9, low: close - 0.9, close, volume: 1 }
+    })
+  }
+
+  it('says the LOWER timeframe is untrended when only the fast leg is flat', () => {
+    const gate = alignmentGate(choppy(), trend(100, 1, 80))
+    expect(gate.status).toBe('unknown')
+    // the old text claimed 'slow 30.4 < 20' while the slow leg was clearly trending
+    expect(gate.detail).toMatch(/lower timeframe is not trending/)
+    expect(gate.detail).not.toMatch(/higher timeframe is not trending/)
+  })
+
+  it('still reports the higher timeframe when that is the flat one', () => {
+    const gate = alignmentGate(trend(100, 1, 80), choppy())
+    expect(gate.detail).toMatch(/higher timeframe is not trending/)
+  })
+})
