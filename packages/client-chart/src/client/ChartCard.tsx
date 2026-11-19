@@ -334,6 +334,31 @@ const CHIP_DEFS: ChipDef[] = [
   { id: 'mfi', indicator: { name: 'TM_MFI', figures: { mfi: 'mfi14' } }, label: ind => ({ text: `MFI ${fmt(get(ind['mfi14'], 'value'))}`, state: get(ind['mfi14'], 'state') }) },
   { id: 'bb', indicator: { name: 'TM_BB', figures: { upper: 'bb_upper', middle: 'bb_middle', lower: 'bb_lower' }, overlay: true }, label: ind => ({ text: 'BB(20,2)', state: get(ind['bollinger20'], 'state') }) },
   { id: 'ma', label: ind => ({ text: 'MA posture', state: get(ind['movingAverages'], 'closeVs') }) },
+  // Two overlay chips: they draw geometry in the price pane instead of adding a pane.
+  // 'overlay: true' keeps them out of paneCount, and their empty `figures` object makes
+  // hasSeries() true for any payload — they need the geometry, not a per-bar column.
+  // The numbers come from the payload, which the host enriches PER TIMEFRAME, so
+  // switching 1d -> 1w recomputes both.
+  {
+    id: 'structure',
+    indicator: { name: 'TM_LEVELS', figures: {}, overlay: true },
+    label: ind => {
+      const st = ind['structure'] as { resistance?: { price: number } | null; support?: { price: number } | null; unavailable?: string } | undefined
+      if (st === undefined || st.unavailable !== undefined) return { text: '價位 —', state: null }
+      const r = st.resistance == null ? null : st.resistance.price
+      const s = st.support == null ? null : st.support.price
+      return { text: `阻力 ${fmt(r)} / 支撐 ${fmt(s)}`, state: r === null && s === null ? null : 'levels' }
+    },
+  },
+  {
+    id: 'channel',
+    indicator: { name: 'TM_CHANNEL', figures: {}, overlay: true },
+    label: ind => {
+      const ch = ind['channel'] as { status?: string; r2?: number; positionPct?: number; bars?: number } | undefined
+      if (ch?.status !== 'ok') return { text: '通道 —', state: ch?.status ?? null }
+      return { text: `通道 R² ${fmt(ch.r2)} · ${fmt(ch.bars)}根`, state: `位置 ${fmt(ch.positionPct)}%` }
+    },
+  },
   // The four-colour regime, appended so no existing chip moves. It carries no
   // `indicator`, so it renders as a readout: the state has no natural numeric axis,
   // and inventing one would put a made-up series on a chart that promises not to.
@@ -507,6 +532,45 @@ function Kline({ data, scenarios, dark, active, seriesKey, baseHeight = CHART_HE
     for (const s of scenarios) {
       if (s.triggerPrice !== undefined) primitives.push({ kind: 'hline', price: s.triggerPrice, dashed: true, color: palette.target, label: `trigger (${s.direction})` })
       if (s.invalidationPrice !== undefined) primitives.push({ kind: 'hline', price: s.invalidationPrice, dashed: true, color: palette.invalidation, label: `invalidation (${s.direction})` })
+    }
+    // Chip-driven overlays. These are geometry, not panes: the chip toggles a set of
+    // draw primitives, which is why they carry the same lane layout as annotations.
+    // Everything comes from the payload's per-timeframe indicators, so switching the
+    // timeframe recomputes both — the chip never draws a level from another window.
+    const chips = data.indicators ?? {}
+    const structure = chips['structure'] as
+      | { resistance?: { price: number } | null; support?: { price: number } | null; failedBreak?: { level: number; time: string } | null; unavailable?: string }
+      | undefined
+    if (active.includes('structure') && structure !== undefined && structure.unavailable === undefined) {
+      if (structure.resistance != null) {
+        primitives.push({ kind: 'hline', price: structure.resistance.price, color: palette.invalidation, label: `阻力 ${structure.resistance.price}` })
+      }
+      if (structure.support != null) {
+        primitives.push({ kind: 'hline', price: structure.support.price, color: palette.target, label: `支撐 ${structure.support.price}` })
+      }
+      if (structure.failedBreak != null) {
+        primitives.push({ kind: 'hline', price: structure.failedBreak.level, dashed: true, color: palette.faint, label: `假突破 ${structure.failedBreak.level}` })
+      }
+    }
+    const channel = chips['channel'] as
+      | { status?: string; r2?: number; positionPct?: number; upperStart?: number; upperEnd?: number; lowerStart?: number; lowerEnd?: number; firstTime?: string; lastTime?: string }
+      | undefined
+    if (active.includes('channel') && channel !== undefined && channel.status === 'ok'
+      && typeof channel.firstTime === 'string' && typeof channel.lastTime === 'string') {
+      primitives.push({
+        kind: 'polyline',
+        points: [{ time: channel.firstTime, price: channel.upperStart! }, { time: channel.lastTime, price: channel.upperEnd! }],
+        color: palette.invalidation,
+        dashed: true,
+        label: `通路上軌 · R² ${channel.r2}`,
+      })
+      primitives.push({
+        kind: 'polyline',
+        points: [{ time: channel.firstTime, price: channel.lowerStart! }, { time: channel.lastTime, price: channel.lowerEnd! }],
+        color: palette.target,
+        dashed: true,
+        label: `通路下軌 · 位置 ${channel.positionPct}%`,
+      })
     }
     let lowest = Infinity
     let highest = -Infinity

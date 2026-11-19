@@ -1,28 +1,26 @@
-feat(tool-market): market_channel — a channel that can fail
+feat(client-chart): two overlay chips — price levels and the channel
 
-The workflow needs a channel; the structure layer only had a range plus a slope,
-which is a proxy, not a channel.
+The panel could show indicator panes but had no way to put geometry on the price
+pane, so structure levels and the newly built channel only ever appeared as text in
+the conversation. Two chips now draw them, and both recompute with the timeframe
+because the host enriches each timeframe's payload separately.
 
-Two designs were tried and rejected before this one, both worth recording:
+Host: enrichChart gains two geometries beside the regime snapshot —
+  structure: nearest confirmed resistance/support with distance and age, plus the
+    last failed break;
+  channel: the regression channel's two rails as endpoint pairs, with R-squared,
+    position and width. A channel is straight, so two points per rail suffice.
 
-  1. Rails at the extreme residuals of the swing points. Parallel by construction,
-     but anchored to old pivots: after copper's break it printed 'position -78%',
-     and gold's rails sat 7 ATR from their own swings.
-  2. Gating that fit on touch ratio plus worst deviation. The deviation metric
-     measures channel THICKNESS in ATR, not fit quality, so every instrument was
-     refused: copper, oil, gold and QQQ all came back 'no channel'.
+Client: both chips are 'overlay: true' with empty figures, so they are excluded from
+paneCount and hasSeries() passes for any payload; the primitives they add ride the
+existing hline/polyline draw path and therefore the existing label-lane layout, so
+their captions cannot collide with annotation labels.
 
-What ships is a linear regression channel: regress close on bar index, rails at
-two sigma of the residuals. Every bar votes, the rails move with the fit, and
-R-squared decides whether a channel exists at all — under 0.3 the tool says 'this
-is a range, not a channel' instead of drawing two confident lines.
-
-Live check, 60 bars: copper R2 0.40 with the close below the lower rail and two
-held breaks; gold R2 0.89 with three failed upper-rail breaks before the downside
-break; oil R2 0.16 and QQQ R2 0.06 both correctly refused as ranges.
-
-index.ts was restored from HEAD mid-work: a read with the default 2000-line limit
-was written back and truncated the file at 971 lines. The tool was then re-added
-surgically instead of by whole-file rewrite.
+The channel chip tries 120 bars, then 60, then 40, and reports which one it used.
+A single fixed window was wrong: the panel holds ~1000 bars, and a 120-bar
+regression of copper's four-month range-then-break gives R2 0.01, so the chip read
+'no channel' on markets that are trending on a shorter horizon. Measured after the
+fallback: copper 1d R2 0.40 at 60 bars, copper weekly R2 0.85 at 120, oil R2 0.65,
+QQQ R2 0.33 — each with its own window stated in the label.
 
 37 test files, 580 tests.
